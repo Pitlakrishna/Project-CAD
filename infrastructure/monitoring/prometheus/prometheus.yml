@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'kong-gateway'
+    static_configs:
+      - targets: ['kong:8001']
+
+  - job_name: 'cad-service'
+    static_configs:
+      - targets: ['cad-service:8080']
+
+  - job_name: 'llm-service'
+    static_configs:
+      - targets: ['llm-service:8000']
+
+  - job_name: 'auth-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['auth-service:8081']

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package aicad.cad.v1;
+
+option go_package = "github.com/aicad/go-common/proto/cad/v1;cadv1";
+
+service CadEngineService {
+  rpc GenerateModel (GenerateModelRequest) returns (GenerateModelResponse);
+  rpc ExportModel (ExportModelRequest) returns (ExportModelResponse);
+}
+
+message GenerateModelRequest {
+  string script = 1;
+  string format = 2; // "replicad", "openscad"
+  map<string, double> parameters = 3;
+}
+
+message GenerateModelResponse {
+  string model_id = 1;
+  bytes mesh_data = 2; // GLTF / GLB buffer
+  int64 vertex_count = 3;
+  int64 triangle_count = 4;
+}
+
+message ExportModelRequest {
+  string model_id = 1;
+  string export_format = 2; // "step", "stl", "dxf"
+}
+
+message ExportModelResponse {
+  string download_url = 1;
+  int64 file_size_bytes = 2;
+}
