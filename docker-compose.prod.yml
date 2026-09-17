@@ -26,16 +26,16 @@ services:
           cpus: '2.0'
           memory: 4096M
 
-  minio:
-    restart: always
+  # minio:
+  #   restart: always
 
-  clickhouse:
-    restart: always
-    deploy:
-      resources:
-        limits:
-          cpus: '4.0'
-          memory: 8192M
+  # clickhouse:
+  #   restart: always
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '4.0'
+  #         memory: 8192M
 
   kong:
     restart: always

@@ -17,7 +17,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aicad} -d ${POSTGRES_DB:-aicad_db}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aicad} -d ${POSTGRES_DB:-aicad_db}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -31,13 +31,13 @@ services:
     image: redis:7-alpine
     container_name: aicad-redis
     restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis_secret}"]
+    command: [ "redis-server", "--requirepass", "${REDIS_PASSWORD:-redis_secret}" ]
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secret}", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secret}", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -55,12 +55,12 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
     ports:
-      - "5672:5672"     # AMQP protocol
-      - "15672:15672"   # Management Web UI
+      - "5672:5672" # AMQP protocol
+      - "15672:15672" # Management Web UI
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      test: [ "CMD", "rabbitmq-diagnostics", "check_port_connectivity" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -79,12 +79,12 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # MinIO Web Console
+      - "9000:9000" # S3 API
+      - "9001:9001" # MinIO Web Console
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -103,12 +103,12 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse_secret}
     ports:
-      - "8123:8123"   # HTTP interface
-      - "9004:9000"   # Native TCP client (mapped to 9004 to avoid MinIO conflict)
+      - "8123:8123" # HTTP interface
+      - "9004:9000" # Native TCP client (mapped to 9004 to avoid MinIO conflict)
     volumes:
       - clickhouse_data:/var/lib/clickhouse
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -132,8 +132,8 @@ services:
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
       KONG_PROXY_LISTEN: 0.0.0.0:8000
     ports:
-      - "8000:8000"   # Public Proxy Gateway
-      - "8001:8001"   # Kong Admin API
+      - "8000:8000" # Public Proxy Gateway
+      - "8001:8001" # Kong Admin API
     volumes:
       - ./gateway/kong.yml:/kong/declarative/kong.yml:ro
     depends_on:
