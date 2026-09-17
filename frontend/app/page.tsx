@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { AppSettings, ChatMessage, ChatSession, ProviderType } from "../lib/types";
+import { AppSettings, ChatMessage, ChatSession, ProviderType, CadGenerationResponse } from "../lib/types";
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -14,6 +14,7 @@ import {
 import { generateCad, refineCad } from "../lib/api";
 import { Sidebar } from "../components/Sidebar";
 import { SettingsModal } from "../components/SettingsModal";
+import { AdsPanel } from "../components/AdsPanel";
 import { CadCodeViewer } from "../components/CadCodeViewer";
 import { ChatInput } from "../components/ChatInput";
 import {
@@ -66,11 +67,10 @@ export default function Home() {
     if (loadedSessions.length > 0) {
       setSessions(loadedSessions);
       const savedActiveId = getActiveSessionId();
-      if (savedActiveId && loadedSessions.some((s) => s.id === savedActiveId)) {
-        setActiveSessionIdState(savedActiveId);
-      } else {
-        setActiveSessionIdState(loadedSessions[0].id);
-      }
+      const current = savedActiveId
+        ? loadedSessions.find((s) => s.id === savedActiveId) || loadedSessions[0]
+        : loadedSessions[0];
+      setActiveSessionIdState(current.id);
     } else {
       // Create initial empty session
       const initialSession: ChatSession = {
@@ -146,7 +146,7 @@ export default function Home() {
       timestamp: Date.now(),
     };
 
-    // Find the latest previous CAD response in this session to check for refinement
+    // Check if previous assistant message exists with CAD code for refinement
     const previousAssistantMsg = [...activeSession.messages]
       .reverse()
       .find((m) => m.role === "assistant" && m.cadResponse?.replicad_code);
@@ -156,7 +156,7 @@ export default function Home() {
     const updatedMessages = [...activeSession.messages, userMessage];
     const newTitle =
       activeSession.messages.length === 0
-        ? promptText.slice(0, 32) + (promptText.length > 32 ? "..." : "")
+        ? promptText.slice(0, 30) + (promptText.length > 30 ? "..." : "")
         : activeSession.title;
 
     const updatedSession: ChatSession = {
@@ -175,7 +175,7 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      let cadResult;
+      let cadResult: CadGenerationResponse;
 
       if (isRefinement && previousAssistantMsg?.cadResponse) {
         cadResult = await refineCad(
@@ -237,7 +237,7 @@ export default function Home() {
   const getProviderLabel = (p: ProviderType) => {
     switch (p) {
       case "anthropic":
-        return "Claude 3.5 Sonnet";
+        return "Claude 3.5";
       case "openai":
         return "GPT-4o";
       case "ollama":
@@ -250,7 +250,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0d0d0d] text-[#f4f4f4]">
-      {/* Sidebar */}
+      {/* 1. Left History Sidebar */}
       <Sidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
@@ -263,20 +263,20 @@ export default function Home() {
         onCloseMobile={() => setIsSidebarOpen(false)}
       />
 
-      {/* Main Chat Workspace */}
+      {/* 2. Center Chat & Workspace Area */}
       <div className="flex-1 flex flex-col min-w-0 h-full relative">
-        {/* Top Bar Header */}
-        <header className="h-14 border-b border-[#262626] bg-[#0d0d0d]/90 backdrop-blur-xs flex items-center justify-between px-4 z-10 shrink-0">
+        {/* Top Header */}
+        <header className="h-14 border-b border-[#262626] bg-[#0d0d0d]/95 backdrop-blur-xs flex items-center justify-between px-4 z-10 shrink-0">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               className="p-2 rounded-xl text-[#8e8e8e] hover:text-white hover:bg-[#1c1c1c] transition-colors md:hidden cursor-pointer"
-              title="Toggle sidebar"
+              title="Toggle history sidebar"
             >
               <IconSidebar className="w-5 h-5" />
             </button>
 
-            {/* Model Indicator Pill (click to open settings) */}
+            {/* Provider Pill */}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#171717] hover:bg-[#212121] border border-[#292929] hover:border-[#383838] transition-all text-xs font-medium cursor-pointer"
@@ -285,7 +285,7 @@ export default function Home() {
               <span className="text-[#f4f4f4]">{getProviderLabel(settings.selectedProvider)}</span>
               <span className="text-[10px] text-[#737373] uppercase tracking-wider font-mono">
                 {settings.selectedProvider === "anthropic"
-                  ? settings.anthropicModel.slice(0, 16)
+                  ? settings.anthropicModel.slice(0, 14)
                   : settings.selectedProvider === "openai"
                   ? settings.openaiModel
                   : settings.selectedProvider}
@@ -293,11 +293,12 @@ export default function Home() {
             </button>
           </div>
 
+          {/* Right Header Buttons */}
           <div className="flex items-center gap-2">
             <button
               onClick={handleNewSession}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1c1c1c] hover:bg-[#262626] border border-[#2b2b2b] text-xs text-[#d1d1d1] hover:text-white transition-colors cursor-pointer"
-              title="Start a new 3D model"
+              title="New 3D model"
             >
               <IconPlus className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">New Model</span>
@@ -306,17 +307,17 @@ export default function Home() {
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="p-2 rounded-xl text-[#8e8e8e] hover:text-white hover:bg-[#1c1c1c] border border-transparent hover:border-[#2b2b2b] transition-colors cursor-pointer"
-              title="Settings & API keys"
+              title="Settings"
             >
               <IconGear className="w-4 h-4" />
             </button>
           </div>
         </header>
 
-        {/* Chat Message Stream */}
+        {/* Chat Messages Stream */}
         <main className="flex-1 overflow-y-auto px-4 py-6">
           <div className="w-full max-w-3xl mx-auto space-y-6">
-            {/* Empty State / Welcome Screen */}
+            {/* Empty State */}
             {(!activeSession || activeSession.messages.length === 0) && (
               <div className="pt-12 pb-6 flex flex-col items-center text-center space-y-6">
                 <div className="w-12 h-12 rounded-2xl bg-[#1c1c1c] border border-[#2e2e2e] flex items-center justify-center text-white shadow-lg">
@@ -325,14 +326,14 @@ export default function Home() {
 
                 <div className="space-y-2 max-w-md">
                   <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-[#f4f4f4]">
-                    What 3D model would you like to build?
+                    What 3D model would you like to design?
                   </h1>
                   <p className="text-xs sm:text-sm text-[#8e8e8e]">
-                    Enter any prompt. AICAD generates watertight, parametric Replicad TypeScript code with assemblies, materials, and optics.
+                    Enter any text prompt. AICAD generates watertight, parametric Replicad TypeScript code with assemblies, materials, and optics.
                   </p>
                 </div>
 
-                {/* Suggestions Grid */}
+                {/* Prompt Cards */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full pt-4 text-left">
                   {EMPTY_SUGGESTIONS.map((item, idx) => (
                     <button
@@ -361,14 +362,12 @@ export default function Home() {
                   key={message.id}
                   className={`flex gap-3.5 ${isUser ? "justify-end" : "justify-start"}`}
                 >
-                  {/* Assistant Avatar */}
                   {!isUser && (
                     <div className="w-7 h-7 rounded-xl bg-[#212121] border border-[#303030] flex items-center justify-center text-white shrink-0 mt-0.5 shadow-xs">
                       <IconCube className="w-3.5 h-3.5" />
                     </div>
                   )}
 
-                  {/* Message Bubble & Content */}
                   <div
                     className={`flex flex-col ${
                       isUser
@@ -376,41 +375,39 @@ export default function Home() {
                         : "max-w-full flex-1 items-start"
                     }`}
                   >
-                    {/* User Text Bubble */}
                     {isUser ? (
                       <div className="px-4 py-2.5 rounded-2xl bg-[#212121] border border-[#2f2f2f] text-sm text-[#f4f4f4] leading-relaxed shadow-xs">
                         {message.content}
                       </div>
                     ) : (
                       <div className="w-full text-sm text-[#dcdcdc] leading-relaxed space-y-2">
-                        {/* Error state */}
                         {message.error ? (
                           <div className="p-4 rounded-xl bg-red-950/30 border border-red-800/40 text-xs text-red-300">
                             {message.content}
                           </div>
                         ) : (
                           <>
-                            {/* Generation Metadata Badges */}
+                            {/* Metadata */}
                             {message.cadResponse && (
                               <div className="flex items-center gap-2 pb-1 text-[11px] text-[#737373]">
-                                <span className="px-2 py-0.5 rounded-md bg-[#1a1a1a] border border-[#262626] text-[#a3a3a3] font-medium uppercase tracking-wider font-mono">
-                                  {message.cadResponse.provider} : {message.cadResponse.model}
+                                <span className="px-2 py-0.5 rounded-md bg-[#1a1a1a] border border-[#262626] text-[#a3a3a3] font-mono">
+                                  {message.cadResponse.provider}
                                 </span>
                                 {message.cadResponse.latency_ms && (
                                   <span>{message.cadResponse.latency_ms} ms</span>
                                 )}
                                 {message.cadResponse.cached && (
-                                  <span className="text-emerald-400 font-medium">⚡ cached</span>
+                                  <span className="text-emerald-400">⚡ cached</span>
                                 )}
                               </div>
                             )}
 
-                            {/* Assistant Explanation */}
+                            {/* Explanation */}
                             <div className="whitespace-pre-wrap text-sm text-[#e0e0e0] leading-relaxed">
                               {message.content}
                             </div>
 
-                            {/* Replicad Code & Assembly Viewer */}
+                            {/* In-Chat CAD Code & Assembly Viewer */}
                             {message.cadResponse && (
                               <CadCodeViewer
                                 data={message.cadResponse}
@@ -434,7 +431,7 @@ export default function Home() {
                 </div>
                 <div className="p-4 rounded-2xl bg-[#171717] border border-[#262626] text-xs text-[#a3a3a3] flex items-center gap-3">
                   <div className="w-4 h-4 border-2 border-white/60 border-t-transparent rounded-full animate-spin shrink-0" />
-                  <span>Synthesizing parametric Replicad TypeScript CAD geometry...</span>
+                  <span>Generating parametric 3D CAD model...</span>
                 </div>
               </div>
             )}
@@ -444,7 +441,7 @@ export default function Home() {
         </main>
 
         {/* Floating Chat Input */}
-        <footer className="shrink-0 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d] to-transparent pt-3">
+        <footer className="shrink-0 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d] to-transparent pt-2">
           <ChatInput
             onSendMessage={handleSendMessage}
             isLoading={isLoading}
@@ -454,7 +451,10 @@ export default function Home() {
         </footer>
       </div>
 
-      {/* Settings Modal */}
+      {/* 3. Right-Side Vertical Advertising Ads Screen (Permanent, No Close Button) */}
+      <AdsPanel />
+
+      {/* 4. Single-Screen Settings Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
