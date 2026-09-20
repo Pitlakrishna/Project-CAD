@@ -3,7 +3,7 @@
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from src.api.schemas import MaterialType, ParameterDefinition, PartVisualSchema
-from src.domain.exceptions import CodeParsingException, SecurityViolationException
+from src.domain.exceptions import SecurityViolationException
 from src.domain.models import ParsedCadModel
 
 
@@ -34,6 +34,11 @@ class ReplicadParser:
         pattern = r"```(?:typescript|ts|javascript|js)?\s*\n(.*?)```"
         matches = list(re.finditer(pattern, raw_text, re.DOTALL | re.IGNORECASE))
 
+        if not matches:
+            # Fallback for unclosed code blocks (e.g. if generation ended before closing backticks)
+            unclosed_pattern = r"```(?:typescript|ts|javascript|js)?\s*\n(.*?)$"
+            matches = list(re.finditer(unclosed_pattern, raw_text, re.DOTALL | re.IGNORECASE))
+
         if matches:
             # Take the largest code block (typically the full model script)
             largest_match = max(matches, key=lambda m: len(m.group(1)))
@@ -51,7 +56,8 @@ class ReplicadParser:
         if "export default function main" in raw_text or "defaultParams" in raw_text or "replicad" in raw_text:
             return raw_text, None
 
-        raise CodeParsingException("No valid Replicad TypeScript code block found in the model response.")
+        # If no Replicad code was generated (conversational prompt, general question, or non-design answer)
+        return "", raw_text.strip()
 
     @classmethod
     def validate_security(cls, code: str) -> None:
@@ -224,6 +230,19 @@ class ReplicadParser:
     def parse_cad_output(cls, raw_text: str) -> ParsedCadModel:
         """Full pipeline: extract code, sanitize security, extract parameters and assembly parts."""
         code, explanation = cls.extract_code_and_explanation(raw_text)
+
+        # Handle conversational / non-design responses without code
+        if not code or not code.strip():
+            return ParsedCadModel(
+                code="",
+                parameters={},
+                parameter_definitions=[],
+                parts=[],
+                materials=[],
+                has_glass=False,
+                explanation=explanation or raw_text.strip(),
+            )
+
         cls.validate_security(code)
 
         parameters, param_defs = cls.extract_parameters(code)

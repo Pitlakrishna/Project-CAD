@@ -1,15 +1,25 @@
 """FastAPI route controllers for LLM service."""
 
 import json
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from src.api.dependencies import get_cad_service, get_event_publisher, get_prompt_cache
+
+logger = logging.getLogger("aicad.llm_service.routes")
+from src.api.dependencies import (
+    extract_credentials_from_request,
+    get_cad_service,
+    get_event_publisher,
+    get_prompt_cache,
+)
 from src.api.schemas import (
     CadGenerationResponse,
     GenerateCadRequest,
     HealthResponse,
     RefineCadRequest,
     ValidateCadRequest,
+    VerifyCredentialsRequest,
+    VerifyCredentialsResponse,
 )
 from src.config import settings
 from src.domain.exceptions import (
@@ -20,8 +30,6 @@ from src.domain.exceptions import (
 from src.domain.services import CadGenerationService
 from src.infrastructure.cache import PromptCache
 from src.infrastructure.messaging import EventPublisher
-from src.prompts.context_builder import ContextBuilder
-from src.providers import get_llm_provider
 
 router = APIRouter(prefix="/api/v1/llm", tags=["LLM CAD Generation"])
 
@@ -34,8 +42,24 @@ router = APIRouter(prefix="/api/v1/llm", tags=["LLM CAD Generation"])
 )
 async def generate_cad(
     request: GenerateCadRequest,
+    raw_request: Request,
     service: CadGenerationService = Depends(get_cad_service),
 ) -> CadGenerationResponse:
+    # Merge credentials from headers if not provided in JSON body
+    cred = extract_credentials_from_request(raw_request)
+    if not request.api_key and cred.api_key:
+        request.api_key = cred.api_key
+    if not request.provider and cred.provider:
+        request.provider = cred.provider
+    if not request.model and cred.model:
+        request.model = cred.model
+    if not request.chat_model and cred.chat_model:
+        request.chat_model = cred.chat_model
+    if not request.cad_model and cred.cad_model:
+        request.cad_model = cred.cad_model
+    if not request.base_url and cred.base_url:
+        request.base_url = cred.base_url
+
     try:
         return await service.generate_cad(request)
     except SecurityViolationException as e:
@@ -61,8 +85,24 @@ async def generate_cad(
 )
 async def refine_cad(
     request: RefineCadRequest,
+    raw_request: Request,
     service: CadGenerationService = Depends(get_cad_service),
 ) -> CadGenerationResponse:
+    # Merge credentials from headers if not provided in JSON body
+    cred = extract_credentials_from_request(raw_request)
+    if not request.api_key and cred.api_key:
+        request.api_key = cred.api_key
+    if not request.provider and cred.provider:
+        request.provider = cred.provider
+    if not request.model and cred.model:
+        request.model = cred.model
+    if not request.chat_model and cred.chat_model:
+        request.chat_model = cred.chat_model
+    if not request.cad_model and cred.cad_model:
+        request.cad_model = cred.cad_model
+    if not request.base_url and cred.base_url:
+        request.base_url = cred.base_url
+
     try:
         return await service.refine_cad(request)
     except SecurityViolationException as e:
@@ -102,27 +142,109 @@ async def validate_cad(
 @router.post("/generate/stream", summary="Stream generated Replicad TypeScript tokens via SSE")
 async def generate_cad_stream(
     request: GenerateCadRequest,
+    raw_request: Request,
     service: CadGenerationService = Depends(get_cad_service),
 ):
     """Streams generated response via Server-Sent Events (SSE)."""
+    cred = extract_credentials_from_request(raw_request)
+    if not request.api_key and cred.api_key:
+        request.api_key = cred.api_key
+    if not request.provider and cred.provider:
+        request.provider = cred.provider
+    if not request.model and cred.model:
+        request.model = cred.model
+    if not request.chat_model and cred.chat_model:
+        request.chat_model = cred.chat_model
+    if not request.cad_model and cred.cad_model:
+        request.cad_model = cred.cad_model
+    if not request.base_url and cred.base_url:
+        request.base_url = cred.base_url
+
     async def event_generator():
-        # First check full cache or generate via service
         try:
-            full_response = await service.generate_cad(request)
-            # Stream code chunks
-            chunk_size = 64
-            code = full_response.replicad_code
-            for i in range(0, len(code), chunk_size):
-                chunk = code[i : i + chunk_size]
-                yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
-
-            # Finally send full payload metadata
-            meta = full_response.model_dump()
-            yield f"data: {json.dumps({'type': 'done', 'metadata': meta})}\n\n"
+            async for item in service.generate_cad_stream(request):
+                yield f"data: {json.dumps(item)}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+            logger.exception("Error in generate_cad_stream: %s", e)
+            err_msg = str(e).strip() or f"{type(e).__name__}: check LLM provider configuration"
+            yield f"data: {json.dumps({'type': 'error', 'error': err_msg})}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    sse_headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=sse_headers)
+
+
+@router.post("/refine/stream", summary="Stream refined Replicad TypeScript tokens via SSE")
+async def refine_cad_stream(
+    request: RefineCadRequest,
+    raw_request: Request,
+    service: CadGenerationService = Depends(get_cad_service),
+):
+    """Streams refined response via Server-Sent Events (SSE)."""
+    cred = extract_credentials_from_request(raw_request)
+    if not request.api_key and cred.api_key:
+        request.api_key = cred.api_key
+    if not request.provider and cred.provider:
+        request.provider = cred.provider
+    if not request.model and cred.model:
+        request.model = cred.model
+    if not request.chat_model and cred.chat_model:
+        request.chat_model = cred.chat_model
+    if not request.cad_model and cred.cad_model:
+        request.cad_model = cred.cad_model
+    if not request.base_url and cred.base_url:
+        request.base_url = cred.base_url
+
+    async def event_generator():
+        try:
+            async for item in service.refine_cad_stream(request):
+                yield f"data: {json.dumps(item)}\n\n"
+        except Exception as e:
+            logger.exception("Error in refine_cad_stream: %s", e)
+            err_msg = str(e).strip() or f"{type(e).__name__}: check LLM provider configuration"
+            yield f"data: {json.dumps({'type': 'error', 'error': err_msg})}\n\n"
+
+    sse_headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers=sse_headers)
+
+
+@router.post(
+    "/verify-key",
+    response_model=VerifyCredentialsResponse,
+    summary="Dynamically verify provider credentials and endpoint connectivity",
+    description="Tests API keys and custom base URLs against providers without performing a full CAD generation.",
+)
+async def verify_credentials_endpoint(
+    req: VerifyCredentialsRequest,
+    raw_request: Request,
+    service: CadGenerationService = Depends(get_cad_service),
+) -> VerifyCredentialsResponse:
+    cred = extract_credentials_from_request(raw_request)
+    provider = req.provider or cred.provider or settings.llm_provider
+    api_key = req.api_key or cred.api_key
+    model = req.model or cred.model
+    base_url = req.base_url or cred.base_url
+
+    valid, message = await service.verify_provider_credentials(
+        provider_name=provider,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
+
+    return VerifyCredentialsResponse(
+        valid=valid,
+        provider=provider,
+        model=model,
+        message=message,
+    )
 
 
 @router.get("/health", response_model=HealthResponse, summary="Service health and backing connectivity check")

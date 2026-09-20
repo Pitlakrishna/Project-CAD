@@ -1,7 +1,7 @@
 """Deterministic Mock LLM Provider for local testing and offline execution."""
 
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from src.domain.models import LlmGenerationResult
 from src.providers.base import BaseLlmProvider
 
@@ -226,16 +226,29 @@ This model generates a precision optical mount assembly featuring an anodized me
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.2,
+        is_cad_task: bool = True,
+        **kwargs: Any,
     ) -> LlmGenerationResult:
         start_time = time.perf_counter()
+
+        if not is_cad_task:
+            latency = (time.perf_counter() - start_time) * 1000
+            return LlmGenerationResult(
+                raw_response="Hello! I am your AI CAD design and technical documentation assistant. How can I help you with your 3D models or documentation today?",
+                token_usage=25,
+                provider="mock",
+                model="mock-conversational",
+                latency_ms=round(latency, 2),
+            )
 
         user_content = ""
         for m in reversed(messages):
             if m["role"] == "user":
-                user_content = m["content"].lower()
+                # Only check actual user prompt before boilerplate suffix
+                user_content = m["content"].split("\n\n")[0].lower()
                 break
 
-        if any(w in user_content for w in ["lens", "optic", "gauge", "cylinder", "round"]):
+        if any(w in user_content for w in ["lens", "optic", "camera", "barrel", "gauge"]):
             template = self.GLASS_OPTIC_TEMPLATE
         else:
             template = self.GLASS_ENCLOSURE_TEMPLATE
@@ -252,3 +265,6 @@ This model generates a precision optical mount assembly featuring an anodized me
 
     async def is_available(self) -> bool:
         return True
+
+    async def verify_credentials(self, model: Optional[str] = None) -> tuple[bool, str]:
+        return True, "Mock provider ready (offline parametric CAD engine)."

@@ -1,5 +1,6 @@
 """Redis caching layer for generated Replicad models."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -22,10 +23,11 @@ class PromptCache:
                     port=settings.redis_port,
                     password=settings.redis_password,
                     decode_responses=True,
-                    socket_connect_timeout=2.0,
+                    socket_connect_timeout=0.15,
+                    socket_timeout=0.15,
                 )
             except Exception as e:
-                logger.warning("Failed to initialize Redis cache connection: %s", e)
+                logger.debug("Failed to initialize Redis cache connection: %s", e)
                 self._redis = None
 
     @staticmethod
@@ -38,11 +40,13 @@ class PromptCache:
         if not self._redis or not settings.cache_enabled:
             return None
         try:
-            val = await self._redis.get(cache_key)
+            val = await asyncio.wait_for(self._redis.get(cache_key), timeout=0.15)
             if val:
                 return json.loads(val)
         except Exception as e:
-            logger.debug("Redis GET error: %s", e)
+            logger.debug("Redis unavailable, bypassing cache: %s", e)
+            # Disable redis handle to prevent blocking future requests when Redis is down
+            self._redis = None
         return None
 
     async def set(self, cache_key: str, data: Dict[str, Any], ttl: Optional[int] = None) -> None:
@@ -50,9 +54,13 @@ class PromptCache:
             return
         try:
             ttl_val = ttl or settings.cache_ttl_seconds
-            await self._redis.setex(cache_key, ttl_val, json.dumps(data))
+            await asyncio.wait_for(
+                self._redis.setex(cache_key, ttl_val, json.dumps(data)),
+                timeout=0.2,
+            )
         except Exception as e:
             logger.debug("Redis SETEX error: %s", e)
+            self._redis = None
 
     async def ping(self) -> bool:
         if not self._redis:

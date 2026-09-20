@@ -64,6 +64,13 @@ plugins:
         - Accept
         - Content-Type
         - Authorization
+        - X-API-Key
+        - X-Provider
+        - X-Model
+        - X-Base-URL
+        - X-OpenAI-API-Key
+        - X-Anthropic-API-Key
+        - X-Gemini-API-Key
       exposed_headers:
         - Authorization
       credentials: true

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from src.config import settings
 from src.domain.exceptions import ProviderException
 from src.domain.models import LlmGenerationResult
@@ -15,18 +15,26 @@ if TYPE_CHECKING:
 class OpenAiProvider(BaseLlmProvider):
     """OpenAI API connector for GPT-4o and GPT-4 Turbo models."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         self.api_key = api_key or settings.openai_api_key
+        self.base_url = base_url or settings.openai_base_url
         self._client: Optional[AsyncOpenAI] = None
         if self.api_key:
             from openai import AsyncOpenAI
-            self._client = AsyncOpenAI(api_key=self.api_key, timeout=settings.openai_timeout_seconds)
+            client_kwargs = {
+                "api_key": self.api_key,
+                "timeout": settings.openai_timeout_seconds,
+            }
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+            self._client = AsyncOpenAI(**client_kwargs)
 
     async def generate(
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.2,
+        **kwargs: Any,
     ) -> LlmGenerationResult:
         if not self._client:
             raise ProviderException("OpenAI API key is not configured.")
@@ -47,17 +55,14 @@ class OpenAiProvider(BaseLlmProvider):
                 openai_messages.append({"role": "user", "content": content})
 
         try:
-            if not (selected_model.startswith("o1") or selected_model.startswith("o3")):
-                response = await self._client.chat.completions.create(
-                    model=selected_model,
-                    messages=openai_messages,
-                    temperature=temperature,
-                )
-            else:
-                response = await self._client.chat.completions.create(
-                    model=selected_model,
-                    messages=openai_messages,
-                )
+            create_kwargs: Dict[str, Any] = {
+                "model": selected_model,
+                "messages": openai_messages,
+            }
+            if not selected_model.startswith(("o1", "o3")):
+                create_kwargs["temperature"] = temperature
+
+            response = await self._client.chat.completions.create(**create_kwargs)
 
             latency = (time.perf_counter() - start_time) * 1000
             content = response.choices[0].message.content or ""
@@ -75,3 +80,14 @@ class OpenAiProvider(BaseLlmProvider):
 
     async def is_available(self) -> bool:
         return bool(self.api_key)
+
+    async def verify_credentials(self, model: Optional[str] = None) -> tuple[bool, str]:
+        if not self.api_key or not self._client:
+            return False, "OpenAI API key is missing. Please provide an API key in settings or set OPENAI_API_KEY."
+        target_model = model or settings.openai_model
+        try:
+            # First attempt to list models with short timeout to verify key
+            await self._client.models.list()
+            return True, f"OpenAI credentials verified successfully (model target: {target_model})."
+        except Exception as e:
+            return False, f"OpenAI authentication/connection failed: {str(e)}"

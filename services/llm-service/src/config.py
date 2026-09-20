@@ -19,13 +19,25 @@ class Settings(BaseSettings):
 
     # OpenAI Settings
     openai_api_key: Optional[str] = None
+    openai_base_url: Optional[str] = None
     openai_model: str = "gpt-4o"
+    openai_fast_model: str = "gpt-4o-mini"
     openai_timeout_seconds: float = 60.0
 
     # Anthropic Settings
     anthropic_api_key: Optional[str] = None
+    anthropic_base_url: Optional[str] = None
     anthropic_model: str = "claude-3-5-sonnet-20241022"
+    anthropic_fast_model: str = "claude-3-5-haiku-20241022"
     anthropic_timeout_seconds: float = 60.0
+
+    # Google Gemini Settings
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_fast_model: str = "gemini-3.5-flash-lite"
+    gemini_timeout_seconds: float = 60.0
+    gemini_thinking_budget_chat: int = 0
+    gemini_thinking_budget_cad: int = 512
 
     # Ollama Settings
     ollama_base_url: str = "http://localhost:11434"

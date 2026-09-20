@@ -69,7 +69,7 @@ export function CadPanel({ data, isOpen, onClose, onRefinePrompt }: CadPanelProp
               )}
             </div>
             <div className="text-[10px] text-[#737373] truncate">
-              {data ? `${data.latency_ms || 0}ms • ${data.token_usage || 0} tokens` : "Ready for generation"}
+              {data ? "3D Model Ready" : "Ready for generation"}
             </div>
           </div>
         </div>

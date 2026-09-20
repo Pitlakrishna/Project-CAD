@@ -11,12 +11,12 @@ import {
   getActiveSessionId,
   setActiveSessionId,
 } from "../lib/storage";
-import { generateCad, refineCad } from "../lib/api";
+import { generateCad, refineCad, generateCadStream, refineCadStream } from "../lib/api";
 import { Sidebar } from "../components/Sidebar";
 import { SettingsModal } from "../components/SettingsModal";
 import { AdsPanel } from "../components/AdsPanel";
-import { CadCodeViewer } from "../components/CadCodeViewer";
 import { ChatInput } from "../components/ChatInput";
+import { ChatMessageItem } from "../components/ChatMessageItem";
 import {
   IconSidebar,
   IconGear,
@@ -136,8 +136,46 @@ export default function Home() {
     saveSettings(newSettings);
   };
 
+  function isCadModificationIntent(prompt: string): boolean {
+    const text = prompt.toLowerCase().trim();
+
+    // Explicit non-modification conversational patterns
+    const chatPatterns = [
+      /^(hi|hello|hey|greetings|hola|good morning|good afternoon|good evening)\b/i,
+      /^(thanks|thank you|thx|ok|okay|cool|great|awesome|good job|nice)\b/i,
+      /^(what is|who are you|how do i|how does|why did|can you explain|explain to me|tell me about|what are the)\b/i,
+    ];
+
+    if (chatPatterns.some((pattern) => pattern.test(text))) {
+      return false;
+    }
+
+    // Common CAD modification keywords
+    const modifyKeywords = [
+      "modify", "change", "update", "add", "remove", "delete", "make it",
+      "increase", "decrease", "reduce", "enlarge", "shrink", "taller",
+      "shorter", "wider", "narrower", "thicker", "thinner", "bigger", "smaller",
+      "radius", "diameter", "height", "width", "length", "thickness", "fillet",
+      "chamfer", "hole", "holes", "screw", "screws", "color", "material",
+      "glass", "metal", "plastic", "tolerance", "slot", "slots", "cut", "fuse",
+      "wall", "flange", "tab", "bracket", "mount", "dimension", "dimensions",
+      "mm", "degree", "degrees", "angle", "offset", "scale", "resize"
+    ];
+
+    return modifyKeywords.some((kw) => text.includes(kw));
+  }
+
+  function cleanFinalContent(explanation?: string, streamedContent?: string): string {
+    let content = (explanation || streamedContent || "").trim();
+    // Strip any raw code blocks that might have leaked into the explanation
+    content = content.replace(/```(?:typescript|ts|javascript|js|replicad)?[\s\S]*?```/gi, "").trim();
+    return content;
+  }
+
   const handleSendMessage = async (promptText: string) => {
     if (!promptText.trim() || isLoading || !activeSession) return;
+
+    const targetSessionId = activeSession.id;
 
     const userMessage: ChatMessage = {
       id: "msg-" + Date.now(),
@@ -146,14 +184,29 @@ export default function Home() {
       timestamp: Date.now(),
     };
 
-    // Check if previous assistant message exists with CAD code for refinement
+    // Only refine if a prior CAD model exists AND the user prompt is asking to modify it
     const previousAssistantMsg = [...activeSession.messages]
       .reverse()
       .find((m) => m.role === "assistant" && m.cadResponse?.replicad_code);
 
-    const isRefinement = Boolean(previousAssistantMsg?.cadResponse?.replicad_code);
+    const isRefinement =
+      Boolean(previousAssistantMsg?.cadResponse?.replicad_code) &&
+      isCadModificationIntent(promptText);
 
-    const updatedMessages = [...activeSession.messages, userMessage];
+    const assistantMsgId = "msg-" + (Date.now() + 1);
+    const initialAssistantMessage: ChatMessage = {
+      id: assistantMsgId,
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      timestamp: Date.now() + 1,
+    };
+
+    const updatedMessages = [
+      ...activeSession.messages,
+      userMessage,
+      initialAssistantMessage,
+    ];
     const newTitle =
       activeSession.messages.length === 0
         ? promptText.slice(0, 30) + (promptText.length > 30 ? "..." : "")
@@ -166,69 +219,293 @@ export default function Home() {
       messages: updatedMessages,
     };
 
-    const updatedSessions = sessions.map((s) =>
-      s.id === activeSession.id ? updatedSession : s
+    setSessions((prev) =>
+      prev.map((s) => (s.id === targetSessionId ? updatedSession : s))
     );
-
-    setSessions(updatedSessions);
-    saveSessions(updatedSessions);
     setIsLoading(true);
+
+    let accumulatedContent = "";
+
+    const onToken = (chunk: string) => {
+      accumulatedContent += chunk;
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                  ...m,
+                  content: accumulatedContent,
+                  isStreaming: true,
+                }
+                : m
+            ),
+          };
+        })
+      );
+    };
+
+    const onReset = () => {
+      accumulatedContent = "";
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                  ...m,
+                  content: "",
+                  isStreaming: true,
+                }
+                : m
+            ),
+          };
+        })
+      );
+    };
 
     try {
       let cadResult: CadGenerationResponse;
 
       if (isRefinement && previousAssistantMsg?.cadResponse) {
-        cadResult = await refineCad(
+        cadResult = await refineCadStream(
           promptText,
           previousAssistantMsg.cadResponse.replicad_code,
           previousAssistantMsg.cadResponse.parameters || {},
-          settings
+          settings,
+          () => { },
+          onToken,
+          onReset
         );
       } else {
-        cadResult = await generateCad(promptText, settings);
+        cadResult = await generateCadStream(
+          promptText,
+          settings,
+          () => { },
+          onToken,
+          onReset
+        );
       }
 
-      const assistantMessage: ChatMessage = {
-        id: "msg-" + (Date.now() + 1),
+      if (cadResult?.replicad_code) {
+        console.log("%c[REPLICAD TYPESCRIPT GENERATED]", "color: #38bdf8; font-weight: bold; font-size: 14px;");
+        console.log(cadResult.replicad_code);
+      }
+
+      const finalAssistantMessage: ChatMessage = {
+        id: assistantMsgId,
         role: "assistant",
-        content: cadResult.raw_explanation || "CAD generation complete.",
+        content: cleanFinalContent(cadResult.raw_explanation, accumulatedContent),
+        isStreaming: false,
         cadResponse: cadResult,
         timestamp: Date.now(),
       };
 
-      const finalSession: ChatSession = {
-        ...updatedSession,
-        updatedAt: Date.now(),
-        messages: [...updatedSession.messages, assistantMessage],
-      };
-
-      const finalSessions = sessions.map((s) =>
-        s.id === activeSession.id ? finalSession : s
-      );
-
-      setSessions(finalSessions);
-      saveSessions(finalSessions);
+      setSessions((prev) => {
+        const next = prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            updatedAt: Date.now(),
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId ? finalAssistantMessage : m
+            ),
+          };
+        });
+        saveSessions(next);
+        return next;
+      });
     } catch (err: any) {
-      const errorMessage: ChatMessage = {
-        id: "msg-" + (Date.now() + 1),
+      const errorMsg = err.message || "Unknown error occurred";
+      setSessions((prev) => {
+        const next = prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            updatedAt: Date.now(),
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                  ...m,
+                  isThinking: false,
+                  isStreaming: false,
+                  error: errorMsg,
+                  content: errorMsg.startsWith("Cannot connect") || errorMsg.startsWith("Network error")
+                    ? errorMsg
+                    : "Generation failed: " + errorMsg,
+                }
+                : m
+            ),
+          };
+        });
+        saveSessions(next);
+        return next;
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResubmitPrompt = async (messageId: string, newPromptText: string) => {
+    if (!newPromptText.trim() || isLoading || !activeSession) return;
+
+    const targetSessionId = activeSession.id;
+
+    // Find the message index to edit
+    const msgIndex = activeSession.messages.findIndex((m) => m.id === messageId);
+    if (msgIndex === -1) return;
+
+    // Keep messages before this edited message
+    const messagesBefore = activeSession.messages.slice(0, msgIndex);
+
+    const editedUserMessage: ChatMessage = {
+      ...activeSession.messages[msgIndex],
+      content: newPromptText,
+      timestamp: Date.now(),
+    };
+
+    // Check if there was any prior assistant message with CAD code before this prompt
+    const previousAssistantMsg = [...messagesBefore]
+      .reverse()
+      .find((m) => m.role === "assistant" && m.cadResponse?.replicad_code);
+
+    const isRefinement =
+      Boolean(previousAssistantMsg?.cadResponse?.replicad_code) &&
+      isCadModificationIntent(newPromptText);
+
+    const assistantMsgId = "msg-" + (Date.now() + 1);
+    const initialAssistantMessage: ChatMessage = {
+      id: assistantMsgId,
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      timestamp: Date.now() + 1,
+    };
+
+    const updatedMessages = [
+      ...messagesBefore,
+      editedUserMessage,
+      initialAssistantMessage,
+    ];
+    const newTitle =
+      msgIndex === 0
+        ? newPromptText.slice(0, 30) + (newPromptText.length > 30 ? "..." : "")
+        : activeSession.title;
+
+    const updatedSession: ChatSession = {
+      ...activeSession,
+      title: newTitle,
+      updatedAt: Date.now(),
+      messages: updatedMessages,
+    };
+
+    setSessions((prev) =>
+      prev.map((s) => (s.id === targetSessionId ? updatedSession : s))
+    );
+    setIsLoading(true);
+
+    let accumulatedContent = "";
+
+    const onToken = (chunk: string) => {
+      accumulatedContent += chunk;
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                  ...m,
+                  content: accumulatedContent,
+                  isStreaming: true,
+                }
+                : m
+            ),
+          };
+        })
+      );
+    };
+
+    try {
+      let cadResult: CadGenerationResponse;
+
+      if (isRefinement && previousAssistantMsg?.cadResponse) {
+        cadResult = await refineCadStream(
+          newPromptText,
+          previousAssistantMsg.cadResponse.replicad_code,
+          previousAssistantMsg.cadResponse.parameters || {},
+          settings,
+          () => { },
+          onToken
+        );
+      } else {
+        cadResult = await generateCadStream(
+          newPromptText,
+          settings,
+          () => { },
+          onToken
+        );
+      }
+
+      if (cadResult?.replicad_code) {
+        console.log("%c[REPLICAD TYPESCRIPT GENERATED]", "color: #38bdf8; font-weight: bold; font-size: 14px;");
+        console.log(cadResult.replicad_code);
+      }
+
+      const finalAssistantMessage: ChatMessage = {
+        id: assistantMsgId,
         role: "assistant",
-        content: "Generation failed: " + (err.message || "Unknown error"),
-        error: err.message || "Unknown error occurred",
+        content: cleanFinalContent(cadResult.raw_explanation, accumulatedContent),
+        isStreaming: false,
+        cadResponse: cadResult,
         timestamp: Date.now(),
       };
 
-      const finalSession: ChatSession = {
-        ...updatedSession,
-        updatedAt: Date.now(),
-        messages: [...updatedSession.messages, errorMessage],
-      };
-
-      const finalSessions = sessions.map((s) =>
-        s.id === activeSession.id ? finalSession : s
-      );
-
-      setSessions(finalSessions);
-      saveSessions(finalSessions);
+      setSessions((prev) => {
+        const next = prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            updatedAt: Date.now(),
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId ? finalAssistantMessage : m
+            ),
+          };
+        });
+        saveSessions(next);
+        return next;
+      });
+    } catch (err: any) {
+      const errorMsg = err.message || "Unknown error occurred";
+      setSessions((prev) => {
+        const next = prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            updatedAt: Date.now(),
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                  ...m,
+                  isThinking: false,
+                  isStreaming: false,
+                  error: errorMsg,
+                  content: errorMsg.startsWith("Cannot connect") || errorMsg.startsWith("Network error")
+                    ? errorMsg
+                    : "Generation failed: " + errorMsg,
+                }
+                : m
+            ),
+          };
+        });
+        saveSessions(next);
+        return next;
+      });
     } finally {
       setIsLoading(false);
     }
@@ -237,14 +514,12 @@ export default function Home() {
   const getProviderLabel = (p: ProviderType) => {
     switch (p) {
       case "anthropic":
-        return "Claude 3.5";
+        return "Claude";
+      case "gemini":
+        return "Gemini";
       case "openai":
-        return "GPT-4o";
-      case "ollama":
-        return "Ollama Local";
-      case "mock":
       default:
-        return "Mock Mode";
+        return "OpenAI";
     }
   };
 
@@ -283,13 +558,6 @@ export default function Home() {
             >
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
               <span className="text-[#f4f4f4]">{getProviderLabel(settings.selectedProvider)}</span>
-              <span className="text-[10px] text-[#737373] uppercase tracking-wider font-mono">
-                {settings.selectedProvider === "anthropic"
-                  ? settings.anthropicModel.slice(0, 14)
-                  : settings.selectedProvider === "openai"
-                  ? settings.openaiModel
-                  : settings.selectedProvider}
-              </span>
             </button>
           </div>
 
@@ -355,83 +623,25 @@ export default function Home() {
             )}
 
             {/* Conversation Messages */}
-            {activeSession?.messages.map((message) => {
-              const isUser = message.role === "user";
-              return (
-                <div
-                  key={message.id}
-                  className={`flex gap-3.5 ${isUser ? "justify-end" : "justify-start"}`}
-                >
-                  {!isUser && (
-                    <div className="w-7 h-7 rounded-xl bg-[#212121] border border-[#303030] flex items-center justify-center text-white shrink-0 mt-0.5 shadow-xs">
-                      <IconCube className="w-3.5 h-3.5" />
-                    </div>
-                  )}
+            {activeSession?.messages.map((message) => (
+              <ChatMessageItem
+                key={message.id}
+                message={message}
+                onResubmitPrompt={handleResubmitPrompt}
+                onRefinePrompt={(suggestion) => handleSendMessage(suggestion)}
+                isLoading={isLoading}
+              />
+            ))}
 
-                  <div
-                    className={`flex flex-col ${
-                      isUser
-                        ? "max-w-[85%] sm:max-w-[75%] items-end"
-                        : "max-w-full flex-1 items-start"
-                    }`}
-                  >
-                    {isUser ? (
-                      <div className="px-4 py-2.5 rounded-2xl bg-[#212121] border border-[#2f2f2f] text-sm text-[#f4f4f4] leading-relaxed shadow-xs">
-                        {message.content}
-                      </div>
-                    ) : (
-                      <div className="w-full text-sm text-[#dcdcdc] leading-relaxed space-y-2">
-                        {message.error ? (
-                          <div className="p-4 rounded-xl bg-red-950/30 border border-red-800/40 text-xs text-red-300">
-                            {message.content}
-                          </div>
-                        ) : (
-                          <>
-                            {/* Metadata */}
-                            {message.cadResponse && (
-                              <div className="flex items-center gap-2 pb-1 text-[11px] text-[#737373]">
-                                <span className="px-2 py-0.5 rounded-md bg-[#1a1a1a] border border-[#262626] text-[#a3a3a3] font-mono">
-                                  {message.cadResponse.provider}
-                                </span>
-                                {message.cadResponse.latency_ms && (
-                                  <span>{message.cadResponse.latency_ms} ms</span>
-                                )}
-                                {message.cadResponse.cached && (
-                                  <span className="text-emerald-400">⚡ cached</span>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Explanation */}
-                            <div className="whitespace-pre-wrap text-sm text-[#e0e0e0] leading-relaxed">
-                              {message.content}
-                            </div>
-
-                            {/* In-Chat CAD Code & Assembly Viewer */}
-                            {message.cadResponse && (
-                              <CadCodeViewer
-                                data={message.cadResponse}
-                                onRefinePrompt={(suggestion) => handleSendMessage(suggestion)}
-                              />
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Loading Indicator */}
-            {isLoading && (
+            {/* Loading Indicator (only shown if not actively streaming an in-place message) */}
+            {isLoading && !activeSession?.messages.some((m) => m.isStreaming) && (
               <div className="flex gap-3.5 items-start">
                 <div className="w-7 h-7 rounded-xl bg-[#212121] border border-[#303030] flex items-center justify-center text-white shrink-0 mt-0.5 animate-pulse">
                   <IconCube className="w-3.5 h-3.5" />
                 </div>
                 <div className="p-4 rounded-2xl bg-[#171717] border border-[#262626] text-xs text-[#a3a3a3] flex items-center gap-3">
                   <div className="w-4 h-4 border-2 border-white/60 border-t-transparent rounded-full animate-spin shrink-0" />
-                  <span>Generating parametric 3D CAD model...</span>
+                  <span>Connecting to model...</span>
                 </div>
               </div>
             )}

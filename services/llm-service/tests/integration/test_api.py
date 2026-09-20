@@ -84,3 +84,69 @@ def test_refine_cad_endpoint(client: TestClient):
     data = response.json()
     assert "replicad_code" in data
     assert "prompt_id" in data
+
+
+def test_verify_key_mock_provider(client: TestClient):
+    payload = {
+        "provider": "mock",
+    }
+    response = client.post("/api/v1/llm/verify-key", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is True
+    assert data["provider"] == "mock"
+    assert "ready" in data["message"].lower()
+
+
+def test_verify_key_missing_credentials(client: TestClient):
+    payload = {
+        "provider": "openai",
+        "api_key": None,
+    }
+    response = client.post("/api/v1/llm/verify-key", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is False
+    assert "missing" in data["message"].lower()
+
+
+def test_generate_with_header_credentials(client: TestClient):
+    payload = {
+        "prompt": "Create an electronics junction box with clear lid",
+    }
+    headers = {
+        "X-Provider": "mock",
+        "X-API-Key": "test-mock-key",
+    }
+    response = client.post("/api/v1/llm/generate", json=payload, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["provider"] == "mock"
+    assert "replicad_code" in data
+
+
+def test_generate_cad_stream_endpoint(client: TestClient):
+    payload = {
+        "prompt": "Create an aluminum bracket with 4 mounting holes",
+        "provider": "mock",
+    }
+    response = client.post("/api/v1/llm/generate/stream", json=payload)
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    content = response.text
+    assert "data: " in content
+    assert '"type": "done"' in content
+
+
+def test_generate_stream_normal_prompt_greeting(client: TestClient):
+    payload = {
+        "prompt": "hi",
+        "provider": "mock",
+    }
+    response = client.post("/api/v1/llm/generate/stream", json=payload)
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers.get("content-type", "")
+    content = response.text
+    assert "data: " in content
+    assert '"type": "done"' in content
+

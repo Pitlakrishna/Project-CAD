@@ -94,7 +94,10 @@ export function ChatInput({
             title="Click to configure provider & API keys"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span className="capitalize">{selectedProvider} mode</span>
+            <span className="capitalize">{selectedProvider}</span>
+            <span className="text-[10px] text-emerald-400/90 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20 font-normal">
+              Auto-Routing
+            </span>
             <span className="text-[#555]">(change)</span>
           </button>
 

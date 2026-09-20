@@ -37,10 +37,13 @@ class ParameterDefinition(BaseModel):
 
 
 class GenerateCadRequest(BaseModel):
-    prompt: str = Field(..., min_length=3, description="Natural language prompt describing the 3D parametric object")
-    provider: Optional[str] = Field(default=None, description="Optional override: 'openai' | 'anthropic' | 'ollama' | 'mock'")
+    prompt: str = Field(..., min_length=1, description="Natural language prompt describing the 3D parametric object or conversation")
+    provider: Optional[str] = Field(default=None, description="Optional override: 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'mock'")
     model: Optional[str] = Field(default=None, description="Optional override for model name")
+    chat_model: Optional[str] = Field(default=None, description="Optional model override for conversational / fast chat")
+    cad_model: Optional[str] = Field(default=None, description="Optional model override for 3D CAD parametric modeling")
     api_key: Optional[str] = Field(default=None, description="Optional provider API key override from client settings")
+    base_url: Optional[str] = Field(default=None, description="Optional custom base URL (for Ollama, DeepSeek, vLLM, OpenRouter)")
     temperature: Optional[float] = Field(default=0.2, ge=0.0, le=1.0, description="LLM sampling temperature")
     tenant_id: Optional[str] = Field(default=None, description="Tenant identifier")
     user_id: Optional[str] = Field(default="anonymous", description="User identifier")
@@ -48,12 +51,15 @@ class GenerateCadRequest(BaseModel):
 
 
 class RefineCadRequest(BaseModel):
-    prompt: str = Field(..., min_length=3, description="Modification prompt, e.g. 'add a glass window to the front'")
+    prompt: str = Field(..., min_length=1, description="Modification prompt, e.g. 'add a glass window to the front'")
     previous_code: str = Field(..., min_length=10, description="The previous Replicad TypeScript code to modify")
     previous_parameters: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Current parameter values")
     provider: Optional[str] = Field(default=None)
     model: Optional[str] = Field(default=None)
+    chat_model: Optional[str] = Field(default=None)
+    cad_model: Optional[str] = Field(default=None)
     api_key: Optional[str] = Field(default=None)
+    base_url: Optional[str] = Field(default=None)
     tenant_id: Optional[str] = Field(default=None)
     user_id: Optional[str] = Field(default="anonymous")
 
@@ -62,10 +68,25 @@ class ValidateCadRequest(BaseModel):
     replicad_code: str = Field(..., min_length=10, description="Replicad TypeScript code snippet to inspect and parse")
 
 
+class VerifyCredentialsRequest(BaseModel):
+    provider: str = Field(..., description="Provider: 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'mock'")
+    api_key: Optional[str] = Field(default=None, description="Provider API key to test")
+    model: Optional[str] = Field(default=None, description="Model identifier to test against")
+    base_url: Optional[str] = Field(default=None, description="Base URL / host for provider")
+
+
+class VerifyCredentialsResponse(BaseModel):
+    valid: bool = Field(..., description="Whether credentials and connectivity succeeded")
+    provider: str = Field(..., description="Provider name tested")
+    model: Optional[str] = Field(default=None, description="Model used for test")
+    message: str = Field(..., description="Human-readable verification result message")
+
+
 class CadGenerationResponse(BaseModel):
     prompt_id: str = Field(..., description="Unique UUID for this generation request")
-    replicad_code: str = Field(..., description="Cleaned, runnable Replicad TypeScript code")
+    replicad_code: str = Field(default="", description="Cleaned, runnable Replicad TypeScript code")
     raw_explanation: Optional[str] = Field(default=None, description="CAD design commentary and explanation")
+    raw_thoughts: Optional[str] = Field(default=None, description="Model internal thinking/reasoning process")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Extracted parameter dictionary")
     parameter_definitions: List[ParameterDefinition] = Field(default_factory=list, description="Parametric metadata with UI slider bounds")
     parts: List[PartVisualSchema] = Field(default_factory=list, description="List of assembly parts with colors and materials")

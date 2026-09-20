@@ -2,7 +2,7 @@
 
 import pytest
 from src.api.schemas import MaterialType
-from src.domain.exceptions import CodeParsingException, SecurityViolationException
+from src.domain.exceptions import SecurityViolationException
 from src.domain.parser import ReplicadParser
 
 SAMPLE_REPLICAD_RESPONSE = """Here is your parametric electronic case with a glass inspection lid:
@@ -118,6 +118,8 @@ def test_security_violation_detection():
         ReplicadParser.validate_security(malicious_code)
 
 
-def test_invalid_code_raises_parsing_exception():
-    with pytest.raises(CodeParsingException):
-        ReplicadParser.extract_code_and_explanation("Sorry, I cannot generate a CAD model for that.")
+def test_conversational_response_returns_empty_code():
+    code, explanation = ReplicadParser.extract_code_and_explanation("Sorry, I cannot generate a CAD model for that.")
+    assert code == ""
+    assert explanation is not None
+    assert "Sorry" in explanation

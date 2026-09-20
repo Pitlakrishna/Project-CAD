@@ -1,7 +1,7 @@
 """Local Ollama LLM Provider connector (for DeepSeek-Coder, Llama 3, etc.)."""
 
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import httpx
 from src.config import settings
 from src.domain.exceptions import ProviderException
@@ -20,6 +20,7 @@ class OllamaProvider(BaseLlmProvider):
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.2,
+        **kwargs: Any,
     ) -> LlmGenerationResult:
         selected_model = model or settings.ollama_model
         start_time = time.perf_counter()
@@ -60,3 +61,18 @@ class OllamaProvider(BaseLlmProvider):
                 return resp.status_code == 200
         except Exception:
             return False
+
+    async def verify_credentials(self, model: Optional[str] = None) -> tuple[bool, str]:
+        target_model = model or settings.ollama_model
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{self.base_url}/api/tags")
+                if resp.status_code != 200:
+                    return False, f"Ollama instance at {self.base_url} returned HTTP {resp.status_code}"
+                data = resp.json()
+                models = [m.get("name") for m in data.get("models", [])]
+                if target_model and not any(target_model in m for m in models if m):
+                    return True, f"Ollama reachable at {self.base_url}, but '{target_model}' is not in installed models: {models}."
+                return True, f"Ollama connected successfully at {self.base_url} (model '{target_model}' ready)."
+        except Exception as e:
+            return False, f"Could not connect to Ollama at {self.base_url}: {str(e)}"

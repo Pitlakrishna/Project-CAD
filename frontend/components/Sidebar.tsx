@@ -15,10 +15,11 @@ interface SidebarProps {
 }
 
 const PROVIDER_NAMES: Record<ProviderType, string> = {
-  mock: "Mock (Offline)",
-  anthropic: "Claude 3.5",
-  openai: "GPT-4o",
-  ollama: "Ollama (Local)",
+  openai: "OpenAI",
+  anthropic: "Claude",
+  gemini: "Google Gemini",
+  mock: "OpenAI",
+  ollama: "OpenAI",
 };
 
 export function Sidebar({
