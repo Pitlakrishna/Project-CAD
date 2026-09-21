@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import logging
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
+
 from src.config import settings
-from src.domain.exceptions import ProviderException
 from src.domain.models import LlmGenerationResult
-from src.providers.base import BaseLlmProvider
+from src.core.base import BaseLlmProvider
+from src.core.common import (
+    create_generation_result,
+    create_stream_final_payload,
+    execute_with_model_fallback,
+    extract_system_and_messages,
+    handle_provider_error,
+    validate_api_key,
+)
+from src.core.models import get_models_to_try, is_retryable_model_error
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
-    from anthropic.types import MessageParam
+
+logger = logging.getLogger(__name__)
 
 
 class AnthropicProvider(BaseLlmProvider):
@@ -34,60 +45,94 @@ class AnthropicProvider(BaseLlmProvider):
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.2,
+        is_cad_task: bool = True,
         **kwargs: Any,
     ) -> LlmGenerationResult:
-        if not self._client:
-            raise ProviderException("Anthropic API key is not configured.")
-
-        selected_model = model or settings.anthropic_model
+        validate_api_key("anthropic", self.api_key)
         start_time = time.perf_counter()
+        clean_system, claude_messages = extract_system_and_messages(messages)
 
-        # Extract system message from messages list
-        system_content = ""
-        claude_messages: List[MessageParam] = []
-        for m in messages:
-            role = m.get("role", "")
-            content = m.get("content", "")
-            if role == "system":
-                system_content += content + "\n\n"
-            elif role == "assistant":
-                claude_messages.append({"role": "assistant", "content": content})
-            else:
-                claude_messages.append({"role": "user", "content": content})
-
-        clean_system = system_content.strip()
-
-        try:
+        async def _call(target_model: str):
+            assert self._client is not None
             create_kwargs: Dict[str, Any] = {
-                "model": selected_model,
+                "model": target_model,
                 "messages": claude_messages,
-                "max_tokens": 4096,
+                "max_tokens": 4096 if is_cad_task else 2048,
                 "extra_body": {"temperature": temperature},
             }
             if clean_system:
                 create_kwargs["system"] = clean_system
+            return await self._client.messages.create(**create_kwargs)
 
-            response = await self._client.messages.create(**create_kwargs)
+        response, used_model = await execute_with_model_fallback(
+            provider_name="anthropic",
+            requested_model=model,
+            is_cad_task=is_cad_task,
+            call_fn=_call,
+        )
 
-            latency = (time.perf_counter() - start_time) * 1000
-            content = "".join([block.text for block in response.content if hasattr(block, "text")])
-            tokens = response.usage.input_tokens + response.usage.output_tokens if response.usage else 0
+        content = "".join([block.text for block in response.content if hasattr(block, "text")])
+        tokens = response.usage.input_tokens + response.usage.output_tokens if response.usage else 0
+        return create_generation_result(
+            raw_response=content,
+            provider="anthropic",
+            model=used_model,
+            start_time=start_time,
+            token_usage=tokens,
+        )
 
-            return LlmGenerationResult(
-                raw_response=content,
-                token_usage=tokens,
-                provider="anthropic",
-                model=selected_model,
-                latency_ms=round(latency, 2),
-            )
-        except Exception as e:
-            err_str = str(e)
-            if any(term in err_str.lower() for term in ["429", "rate_limit", "rate limit", "credit balance", "quota"]):
-                raise ProviderException(
-                    "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
-                ) from e
-            raise ProviderException(f"Anthropic generation failed: {err_str}") from e
+    async def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.2,
+        is_cad_task: bool = True,
+        **kwargs: Any,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        validate_api_key("anthropic", self.api_key)
+        start_time = time.perf_counter()
+        clean_system, claude_messages = extract_system_and_messages(messages)
+        models_to_try = get_models_to_try("anthropic", requested_model=model, is_cad_task=is_cad_task)
+        last_error: Optional[Exception] = None
 
+        for current_model in models_to_try:
+            yielded_any = False
+            try:
+                if current_model != models_to_try[0]:
+                    logger.info("Anthropic stream: falling back from '%s' to '%s'", models_to_try[0], current_model)
+
+                assert self._client is not None
+                create_kwargs: Dict[str, Any] = {
+                    "model": current_model,
+                    "messages": claude_messages,
+                    "max_tokens": 4096 if is_cad_task else 2048,
+                    "extra_body": {"temperature": temperature},
+                }
+                if clean_system:
+                    create_kwargs["system"] = clean_system
+
+                accumulated_tokens: List[str] = []
+                async with self._client.messages.stream(**create_kwargs) as stream:
+                    async for text in stream.text_stream:
+                        accumulated_tokens.append(text)
+                        yielded_any = True
+                        yield {"type": "token", "content": text}
+
+                full_text = "".join(accumulated_tokens)
+                yield create_stream_final_payload(
+                    raw_response=full_text,
+                    model=current_model,
+                    start_time=start_time,
+                )
+                return
+            except Exception as e:
+                last_error = e
+                if not yielded_any and is_retryable_model_error(e) and current_model != models_to_try[-1]:
+                    logger.warning("Anthropic stream model '%s' failed (%s). Retrying with next fallback model...", current_model, e)
+                    continue
+                break
+
+        handle_provider_error("anthropic", last_error, action="stream")
 
     async def is_available(self) -> bool:
         return bool(self.api_key)

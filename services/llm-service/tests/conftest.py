@@ -12,7 +12,7 @@ os.environ["CACHE_ENABLED"] = "false"
 os.environ["RABBITMQ_ENABLED"] = "false"
 
 from src.main import app
-from src.providers.base import BaseLlmProvider
+from src.core.base import BaseLlmProvider
 from src.domain.models import LlmGenerationResult
 from src.providers import get_llm_provider as original_get_llm_provider
 

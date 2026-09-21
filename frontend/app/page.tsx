@@ -22,7 +22,6 @@ import {
   IconGear,
   IconCube,
   IconSparkles,
-  IconPlus,
 } from "../components/icons";
 
 const EMPTY_SUGGESTIONS = [
@@ -75,7 +74,7 @@ export default function Home() {
       // Create initial empty session
       const initialSession: ChatSession = {
         id: "session-" + Date.now(),
-        title: "New 3D Model",
+        title: "New Chat",
         createdAt: Date.now(),
         updatedAt: Date.now(),
         messages: [],
@@ -103,7 +102,7 @@ export default function Home() {
   const handleNewSession = () => {
     const newSession: ChatSession = {
       id: "session-" + Date.now(),
-      title: "New 3D Model",
+      title: "New Chat",
       createdAt: Date.now(),
       updatedAt: Date.now(),
       messages: [],
@@ -120,7 +119,18 @@ export default function Home() {
     e.stopPropagation();
     const updated = sessions.filter((s) => s.id !== id);
     if (updated.length === 0) {
-      handleNewSession();
+      const freshSession: ChatSession = {
+        id: "session-" + Date.now(),
+        title: "New Chat",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: [],
+      };
+      setSessions([freshSession]);
+      saveSessions([freshSession]);
+      setActiveSessionIdState(freshSession.id);
+      setActiveSessionId(freshSession.id);
+      setIsSidebarOpen(false);
     } else {
       setSessions(updated);
       saveSessions(updated);
@@ -568,15 +578,6 @@ export default function Home() {
 
           {/* Right Header Buttons */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleNewSession}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1c1c1c] hover:bg-[#262626] border border-[#2b2b2b] text-xs text-[#d1d1d1] hover:text-white transition-colors cursor-pointer"
-              title="New 3D model"
-            >
-              <IconPlus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">New Model</span>
-            </button>
-
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="p-2 rounded-xl text-[#8e8e8e] hover:text-white hover:bg-[#1c1c1c] border border-transparent hover:border-[#2b2b2b] transition-colors cursor-pointer"

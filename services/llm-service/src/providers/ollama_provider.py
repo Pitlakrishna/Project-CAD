@@ -1,12 +1,19 @@
-"""Local Ollama LLM Provider connector (for DeepSeek-Coder, Llama 3, etc.)."""
+from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Dict, List, Optional
 import httpx
+
 from src.config import settings
-from src.domain.exceptions import ProviderException
 from src.domain.models import LlmGenerationResult
-from src.providers.base import BaseLlmProvider
+from src.core.base import BaseLlmProvider
+from src.core.common import (
+    create_generation_result,
+    execute_with_model_fallback,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(BaseLlmProvider):
@@ -20,39 +27,41 @@ class OllamaProvider(BaseLlmProvider):
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.2,
+        is_cad_task: bool = True,
         **kwargs: Any,
     ) -> LlmGenerationResult:
-        selected_model = model or settings.ollama_model
         start_time = time.perf_counter()
 
-        payload = {
-            "model": selected_model,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-            },
-        }
-
-        try:
+        async def _call(target_model: str):
+            payload = {
+                "model": target_model,
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                },
+            }
             async with httpx.AsyncClient(timeout=settings.ollama_timeout_seconds) as client:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
                 resp.raise_for_status()
-                data = resp.json()
+                return resp.json()
 
-            latency = (time.perf_counter() - start_time) * 1000
-            content = data.get("message", {}).get("content", "")
-            eval_count = data.get("eval_count", 0) + data.get("prompt_eval_count", 0)
+        data, used_model = await execute_with_model_fallback(
+            provider_name="ollama",
+            requested_model=model,
+            is_cad_task=is_cad_task,
+            call_fn=_call,
+        )
 
-            return LlmGenerationResult(
-                raw_response=content,
-                token_usage=eval_count,
-                provider="ollama",
-                model=selected_model,
-                latency_ms=round(latency, 2),
-            )
-        except Exception as e:
-            raise ProviderException(f"Ollama request to {self.base_url} failed: {str(e)}") from e
+        content = data.get("message", {}).get("content", "")
+        eval_count = data.get("eval_count", 0) + data.get("prompt_eval_count", 0)
+        return create_generation_result(
+            raw_response=content,
+            provider="ollama",
+            model=used_model,
+            start_time=start_time,
+            token_usage=eval_count,
+        )
 
     async def is_available(self) -> bool:
         try:

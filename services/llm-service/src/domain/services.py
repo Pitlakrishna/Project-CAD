@@ -15,6 +15,7 @@ from src.infrastructure.cache import PromptCache
 from src.infrastructure.messaging import EventPublisher
 from src.prompts.context_builder import ContextBuilder
 from src.providers import get_llm_provider
+from src.core.models import get_provider_config, sanitize_model
 
 logger = logging.getLogger(__name__)
 
@@ -72,21 +73,11 @@ class CadGenerationService:
                     target_model = req
 
         if target_model:
-            # Upgrade retired Gemini models
-            if p == "gemini" and any(banned in target_model.lower() for banned in ["2.0-flash", "2.0-flash-exp"]):
-                return settings.gemini_model if is_cad_task else settings.gemini_fast_model
-            return target_model
+            return sanitize_model(p, target_model, is_cad_task=is_cad_task)
 
-        if p == "openai":
-            return settings.openai_model if is_cad_task else settings.openai_fast_model
-        elif p == "anthropic":
-            return settings.anthropic_model if is_cad_task else settings.anthropic_fast_model
-        elif p == "gemini":
-            return settings.gemini_model if is_cad_task else settings.gemini_fast_model
-        elif p == "groq":
-            return settings.groq_model if is_cad_task else settings.groq_fast_model
-        elif p == "ollama":
-            return settings.ollama_model
+        config = get_provider_config(p)
+        if config:
+            return config.cad_model if is_cad_task else config.chat_model
         return "default"
 
     async def generate_cad(self, request: GenerateCadRequest) -> CadGenerationResponse:

@@ -10,7 +10,14 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from src.config import settings
 from src.domain.exceptions import ProviderException
 from src.domain.models import LlmGenerationResult
-from src.providers.base import BaseLlmProvider
+from src.core.base import BaseLlmProvider
+from src.core.common import handle_provider_error, validate_api_key
+from src.core.models import (
+    GEMINI_BANNED_MODELS,
+    get_models_to_try as centralized_get_models_to_try,
+    is_retryable_model_error,
+    sanitize_model as centralized_sanitize_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,14 +26,7 @@ class GeminiProvider(BaseLlmProvider):
     """Google Gemini API connector using the exact model selected by the user."""
 
     DEFAULT_MODEL = "gemini-3.8-flash"
-    BANNED_MODELS = {
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-exp",
-        "gemini-2.0-flash-001",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-exp",
-        "gemini-2.5-flash-001",
-    }
+    BANNED_MODELS = GEMINI_BANNED_MODELS
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or getattr(settings, "gemini_api_key", None)
@@ -108,17 +108,15 @@ class GeminiProvider(BaseLlmProvider):
             if not is_cad_task:
                 # 1. Chat: Turn off/minimize thinking completely for sub-second (<0.5s) response
                 if is_gemini_3:
-                    # Try 'minimal' first (natively supported by gemini-3.5-flash-lite for instant response)
-                    for level in ["minimal", "low"]:
-                        try:
-                            tl = getattr(getattr(types, "ThinkingLevel", None), level.upper(), level)
-                            return types.ThinkingConfig(thinking_level=tl)
-                        except Exception:
-                            continue
+                    # Use 'low' thinking level which is supported by all Gemini 3 models (3.7, 3.8, 3.5)
                     try:
-                        return types.ThinkingConfig(thinking_budget=0)
+                        tl = getattr(getattr(types, "ThinkingLevel", None), "LOW", "low")
+                        return types.ThinkingConfig(thinking_level=tl)
                     except Exception:
-                        return None
+                        try:
+                            return types.ThinkingConfig(thinking_budget=0)
+                        except Exception:
+                            return None
                 else:
                     # Legacy Gemini 2.5 uses thinking_budget=0
                     try:
@@ -188,47 +186,13 @@ class GeminiProvider(BaseLlmProvider):
 
     @classmethod
     def sanitize_model(cls, requested_model: Optional[str], is_cad_task: bool = False) -> str:
-
-        """Sanitizes requested model, explicitly banning deprecated targets and substituting active targets."""
-        fallback = getattr(settings, "gemini_model", cls.DEFAULT_MODEL) if is_cad_task else getattr(settings, "gemini_fast_model", "gemini-3.5-flash-lite")
-        req = (requested_model or fallback).strip()
-        if not req or req.lower() in ("auto", "default"):
-            return settings.gemini_model if is_cad_task else settings.gemini_fast_model
-
-        # Explicitly ban retired gemini-2.0 and gemini-2.5 targets and substitute active target
-        if any(banned in req.lower() for banned in ["2.0-flash", "2.0-flash-exp", "2.5-flash", "2.5-flash-exp"]):
-            target = settings.gemini_model if is_cad_task else settings.gemini_fast_model
-            logger.warning(
-                "Deprecated Gemini model target '%s' requested. Substituting with active target '%s'.",
-                req,
-                target,
-            )
-            return target
-
-        return req
+        """Sanitizes requested model via centralized models registry."""
+        return centralized_sanitize_model("gemini", requested_model, is_cad_task=is_cad_task)
 
     @classmethod
     def _get_models_to_try(cls, requested_model: str, is_cad_task: bool = False) -> List[str]:
-        """Returns ordered list of models: requested model first, followed by safe, modern active fallbacks separated by intent."""
-        clean_model = cls.sanitize_model(requested_model, is_cad_task=is_cad_task)
-        models = [clean_model]
-        if is_cad_task:
-            fallback_candidates = [
-                getattr(settings, "gemini_model", "gemini-3.8-flash"),
-                "gemini-3.8-flash",
-                "gemini-3.7-flash",
-                "gemini-3.5-flash-lite",
-            ]
-        else:
-            fallback_candidates = [
-                getattr(settings, "gemini_fast_model", "gemini-3.5-flash-lite"),
-                "gemini-3.5-flash-lite",
-                "gemini-3.7-flash",
-            ]
-        for fb in fallback_candidates:
-            if fb not in models and fb not in cls.BANNED_MODELS:
-                models.append(fb)
-        return models
+        """Returns ordered list of models for Gemini via centralized models registry."""
+        return centralized_get_models_to_try("gemini", requested_model, is_cad_task=is_cad_task)
 
     async def generate_stream(
         self,
@@ -239,8 +203,7 @@ class GeminiProvider(BaseLlmProvider):
         enable_search: Optional[bool] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        if not self.api_key:
-            raise ProviderException("Gemini API key is not configured.")
+        validate_api_key("gemini", self.api_key)
 
         tools = None
 
@@ -427,13 +390,8 @@ class GeminiProvider(BaseLlmProvider):
                             raw_text_parts = []
                         break
 
-        err_lower = str(last_error).lower()
-        if any(w in err_lower for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
-            clean_msg = "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
-        else:
-            clean_msg = f"Gemini connection error for '{selected_model}': {last_error}"
-        raise ProviderException(clean_msg)
-
+        last_exc = last_error if isinstance(last_error, Exception) else Exception(str(last_error))
+        handle_provider_error("gemini", last_exc, action="stream")
 
     async def generate(
         self,
@@ -444,8 +402,7 @@ class GeminiProvider(BaseLlmProvider):
         enable_search: Optional[bool] = None,
         **kwargs: Any,
     ) -> LlmGenerationResult:
-        if not self.api_key:
-            raise ProviderException("Gemini API key is not configured.")
+        validate_api_key("gemini", self.api_key)
 
         tools = None
 
@@ -600,12 +557,8 @@ class GeminiProvider(BaseLlmProvider):
                         )
                         break
 
-        err_lower = str(last_error).lower()
-        if any(w in err_lower for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
-            clean_msg = "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
-        else:
-            clean_msg = f"Gemini connection error for '{selected_model}': {last_error}"
-        raise ProviderException(clean_msg)
+        last_exc = last_error if isinstance(last_error, Exception) else Exception(str(last_error))
+        handle_provider_error("gemini", last_exc, action="generation")
 
 
     async def is_available(self) -> bool:

@@ -77,7 +77,7 @@ export function Sidebar({
               <span className="w-5 h-5 rounded-md bg-[#2d2d2d] flex items-center justify-center text-white group-hover:bg-[#383838]">
                 <IconPlus className="w-3.5 h-3.5" />
               </span>
-              <span>New 3D Model</span>
+              <span>New Chat</span>
             </span>
             <span className="text-[10px] uppercase font-semibold tracking-wider text-[#737373] bg-[#1a1a1a] px-1.5 py-0.5 rounded border border-[#2a2a2a]">
               Ctrl+K
@@ -88,12 +88,12 @@ export function Sidebar({
         {/* Sessions List */}
         <div className="flex-1 overflow-y-auto px-2 py-1 space-y-0.5">
           <div className="px-3 py-1.5 text-[11px] font-medium text-[#737373] uppercase tracking-wider">
-            Recent Models ({sessions.length})
+            Recent Chats ({sessions.length})
           </div>
 
           {sessions.length === 0 ? (
             <div className="px-3 py-8 text-center text-xs text-[#737373]">
-              No saved models yet.
+              No saved chats yet.
               <br />
               Start generating below!
             </div>
@@ -112,7 +112,7 @@ export function Sidebar({
                 >
                   <div className="flex items-center gap-2 min-w-0 pr-6">
                     <IconMessage className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                    <span className="truncate">{session.title || "Untitled Model"}</span>
+                    <span className="truncate">{session.title || "Untitled Chat"}</span>
                   </div>
 
                   <button

@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, cast
+
 from src.config import settings
-from src.domain.exceptions import ProviderException
 from src.domain.models import LlmGenerationResult
-from src.providers.base import BaseLlmProvider
+from src.core.base import BaseLlmProvider
+from src.core.common import (
+    create_generation_result,
+    create_stream_final_payload,
+    execute_with_model_fallback,
+    format_chat_messages,
+    handle_provider_error,
+    validate_api_key,
+)
+from src.core.models import get_models_to_try, is_retryable_model_error
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
-    from openai.types.chat import ChatCompletionMessageParam
 
 logger = logging.getLogger(__name__)
 
@@ -32,107 +40,95 @@ class GroqProvider(BaseLlmProvider):
                 timeout=settings.groq_timeout_seconds,
             )
 
-    def _format_messages(self, messages: List[Dict[str, str]]) -> List[ChatCompletionMessageParam]:
-        formatted: List[ChatCompletionMessageParam] = []
-        for m in messages:
-            role = m.get("role", "")
-            content = m.get("content", "")
-            if role == "system":
-                formatted.append({"role": "system", "content": content})
-            elif role == "assistant":
-                formatted.append({"role": "assistant", "content": content})
-            else:
-                formatted.append({"role": "user", "content": content})
-        return formatted
-
     async def generate(
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.2,
+        is_cad_task: bool = True,
         **kwargs: Any,
     ) -> LlmGenerationResult:
-        if not self._client:
-            raise ProviderException("Groq API key is not configured.")
-
-        selected_model = model or settings.groq_model
+        validate_api_key("groq", self.api_key)
         start_time = time.perf_counter()
-        openai_messages = self._format_messages(messages)
+        openai_messages = format_chat_messages(messages)
 
-        try:
-            response = await self._client.chat.completions.create(
-                model=selected_model,
-                messages=openai_messages,
+        async def _call(target_model: str):
+            assert self._client is not None
+            return await self._client.chat.completions.create(
+                model=target_model,
+                messages=cast(Any, openai_messages),
                 temperature=temperature,
             )
 
-            latency = (time.perf_counter() - start_time) * 1000
-            content = response.choices[0].message.content or ""
-            tokens = response.usage.total_tokens if response.usage else 0
+        response, used_model = await execute_with_model_fallback(
+            provider_name="groq",
+            requested_model=model,
+            is_cad_task=is_cad_task,
+            call_fn=_call,
+        )
 
-            return LlmGenerationResult(
-                raw_response=content,
-                token_usage=tokens,
-                provider="groq",
-                model=selected_model,
-                latency_ms=round(latency, 2),
-            )
-        except Exception as e:
-            err_str = str(e)
-            if any(term in err_str.lower() for term in ["429", "insufficient_quota", "quota", "rate_limit", "rate limit"]):
-                raise ProviderException(
-                    "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
-                ) from e
-            raise ProviderException(f"Groq generation failed: {err_str}") from e
+        content = response.choices[0].message.content or ""
+        tokens = response.usage.total_tokens if response.usage else 0
+        return create_generation_result(
+            raw_response=content,
+            provider="groq",
+            model=used_model,
+            start_time=start_time,
+            token_usage=tokens,
+        )
 
     async def generate_stream(
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
         temperature: float = 0.2,
+        is_cad_task: bool = True,
         **kwargs: Any,
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        if not self._client:
-            raise ProviderException("Groq API key is not configured.")
-
-        selected_model = model or settings.groq_model
+        validate_api_key("groq", self.api_key)
         start_time = time.perf_counter()
-        openai_messages = self._format_messages(messages)
+        openai_messages = format_chat_messages(messages)
+        models_to_try = get_models_to_try("groq", requested_model=model, is_cad_task=is_cad_task)
+        last_error: Optional[Exception] = None
 
-        try:
-            stream = await self._client.chat.completions.create(
-                model=selected_model,
-                messages=openai_messages,
-                temperature=temperature,
-                stream=True,
-            )
+        for current_model in models_to_try:
+            yielded_any = False
+            try:
+                if current_model != models_to_try[0]:
+                    logger.info("Groq stream: falling back from '%s' to '%s'", models_to_try[0], current_model)
 
-            accumulated_tokens: List[str] = []
-            async for chunk in stream:
-                delta = chunk.choices[0].delta if chunk.choices else None
-                if delta and delta.content:
-                    token = delta.content
-                    accumulated_tokens.append(token)
-                    yield {"type": "token", "content": token}
+                assert self._client is not None
+                stream = await self._client.chat.completions.create(
+                    model=current_model,
+                    messages=cast(Any, openai_messages),
+                    temperature=temperature,
+                    stream=True,
+                )
 
-            full_text = "".join(accumulated_tokens)
-            latency = (time.perf_counter() - start_time) * 1000
+                accumulated_tokens: List[str] = []
+                async for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        token = delta.content
+                        accumulated_tokens.append(token)
+                        yielded_any = True
+                        yield {"type": "token", "content": token}
 
-            yield {
-                "type": "final_payload",
-                "raw_response": full_text,
-                "raw_thoughts": "",
-                "token_usage": len(full_text.split()),
-                "model": selected_model,
-                "latency_ms": round(latency, 2),
-            }
-        except Exception as e:
-            err_str = str(e)
-            if any(term in err_str.lower() for term in ["429", "insufficient_quota", "quota", "rate_limit", "rate limit"]):
-                raise ProviderException(
-                    "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
-                ) from e
-            raise ProviderException(f"Groq stream failed: {err_str}") from e
+                full_text = "".join(accumulated_tokens)
+                yield create_stream_final_payload(
+                    raw_response=full_text,
+                    model=current_model,
+                    start_time=start_time,
+                )
+                return
+            except Exception as e:
+                last_error = e
+                if not yielded_any and is_retryable_model_error(e) and current_model != models_to_try[-1]:
+                    logger.warning("Groq stream model '%s' failed (%s). Retrying with next fallback model...", current_model, e)
+                    continue
+                break
+
+        handle_provider_error("groq", last_error, action="stream")
 
     async def is_available(self) -> bool:
         return bool(self.api_key)
