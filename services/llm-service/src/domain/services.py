@@ -83,6 +83,8 @@ class CadGenerationService:
             return settings.anthropic_model if is_cad_task else settings.anthropic_fast_model
         elif p == "gemini":
             return settings.gemini_model if is_cad_task else settings.gemini_fast_model
+        elif p == "groq":
+            return settings.groq_model if is_cad_task else settings.groq_fast_model
         elif p == "ollama":
             return settings.ollama_model
         return "default"
@@ -140,6 +142,7 @@ class CadGenerationService:
             model=model_name,
             temperature=request.temperature or 0.2,
             is_cad_task=is_cad_task,
+            enable_search=request.enable_search,
         )
 
         # Parse and sanitize Replicad TypeScript code
@@ -160,6 +163,7 @@ class CadGenerationService:
             token_usage=result.token_usage,
             cached=False,
             latency_ms=result.latency_ms,
+            grounding_metadata=result.grounding_metadata,
         )
 
         # Asynchronously publish event
@@ -244,6 +248,7 @@ class CadGenerationService:
             model=model_name,
             temperature=request.temperature or 0.2,
             is_cad_task=is_cad_task,
+            enable_search=request.enable_search,
         ):
             if item.get("type") == "final_payload":
                 final_payload = item
@@ -276,6 +281,7 @@ class CadGenerationService:
                 token_usage=final_payload.get("token_usage", 0),
                 cached=False,
                 latency_ms=final_payload.get("latency_ms", 0.0),
+                grounding_metadata=final_payload.get("grounding_metadata"),
             )
 
             # Store in Cache only for CAD designs
@@ -314,6 +320,7 @@ class CadGenerationService:
             model=model_name,
             temperature=0.2,
             is_cad_task=is_cad_task,
+            enable_search=request.enable_search,
         )
 
         parsed = ReplicadParser.parse_cad_output(result.raw_response)
@@ -332,6 +339,7 @@ class CadGenerationService:
             token_usage=result.token_usage,
             cached=False,
             latency_ms=result.latency_ms,
+            grounding_metadata=result.grounding_metadata,
         )
 
         self.event_publisher.publish_code_generated(
@@ -372,6 +380,7 @@ class CadGenerationService:
             model=model_name,
             temperature=0.2,
             is_cad_task=is_cad_task,
+            enable_search=request.enable_search,
         ):
             if item.get("type") == "final_payload":
                 final_payload = item
@@ -404,6 +413,7 @@ class CadGenerationService:
                 token_usage=final_payload.get("token_usage", 0),
                 cached=False,
                 latency_ms=final_payload.get("latency_ms", 0.0),
+                grounding_metadata=final_payload.get("grounding_metadata"),
             )
 
             meta = response.model_dump()

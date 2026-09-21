@@ -155,7 +155,40 @@ class GeminiProvider(BaseLlmProvider):
             return None
 
     @classmethod
+    def _build_tools_config(cls, enable_search: bool = False) -> Optional[List[Any]]:
+        """Search grounding is disabled to prevent 429 quota exhaustion on Gemini API keys."""
+        return None
+
+    @classmethod
+    def _extract_grounding_metadata(cls, cand: Any) -> Optional[Dict[str, Any]]:
+        """Extracts Google Search queries and cited web sources from a candidate."""
+        try:
+            gm = getattr(cand, "grounding_metadata", None)
+            if not gm:
+                return None
+
+            queries = getattr(gm, "web_search_queries", None) or []
+            chunks = getattr(gm, "grounding_chunks", None) or []
+            sources: List[Dict[str, str]] = []
+            for chunk in chunks:
+                web = getattr(chunk, "web", None)
+                if web:
+                    uri = getattr(web, "uri", None) or ""
+                    title = getattr(web, "title", None) or uri
+                    if uri and not any(s.get("uri") == uri for s in sources):
+                        sources.append({"title": title, "uri": uri})
+
+            return {
+                "search_queries": [str(q) for q in queries],
+                "sources": sources,
+            }
+        except Exception as e:
+            logger.debug("Could not parse grounding_metadata: %s", e)
+            return None
+
+    @classmethod
     def sanitize_model(cls, requested_model: Optional[str], is_cad_task: bool = False) -> str:
+
         """Sanitizes requested model, explicitly banning deprecated targets and substituting active targets."""
         fallback = getattr(settings, "gemini_model", cls.DEFAULT_MODEL) if is_cad_task else getattr(settings, "gemini_fast_model", "gemini-3.5-flash-lite")
         req = (requested_model or fallback).strip()
@@ -203,10 +236,13 @@ class GeminiProvider(BaseLlmProvider):
         model: Optional[str] = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
+        enable_search: Optional[bool] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         if not self.api_key:
             raise ProviderException("Gemini API key is not configured.")
+
+        tools = None
 
         default_target = getattr(settings, "gemini_model", self.DEFAULT_MODEL) if is_cad_task else getattr(settings, "gemini_fast_model", "gemini-3.5-flash-lite")
         selected_model = self.sanitize_model(model or default_target, is_cad_task=is_cad_task)
@@ -238,6 +274,7 @@ class GeminiProvider(BaseLlmProvider):
                 max_output_tokens=max_tokens,
                 system_instruction=system_instruction,
                 thinking_config=thinking_config,
+                tools=tools,
             )
 
             # Try up to 2 attempts for the requested model if it's a transient spike, 1 for fallbacks
@@ -247,6 +284,7 @@ class GeminiProvider(BaseLlmProvider):
                 model_start_time = time.perf_counter()
                 raw_text_parts = []
                 total_tokens = 0
+                latest_grounding_cand = None
                 try:
                     response_stream = await client.aio.models.generate_content_stream(
                         model=current_model,
@@ -261,6 +299,8 @@ class GeminiProvider(BaseLlmProvider):
 
                         if chunk.candidates and len(chunk.candidates) > 0:
                             cand = chunk.candidates[0]
+                            if getattr(cand, "grounding_metadata", None):
+                                latest_grounding_cand = cand
                             finish_reason = getattr(cand, "finish_reason", None)
                             if finish_reason and str(finish_reason) not in ("STOP", "FinishReason.STOP", "None"):
                                 logger.info("Gemini '%s' stream finish_reason: %s", current_model, finish_reason)
@@ -286,6 +326,8 @@ class GeminiProvider(BaseLlmProvider):
                         last_error = f"Model '{current_model}' returned 0 tokens"
                         continue
 
+                    grounding_data = self._extract_grounding_metadata(latest_grounding_cand) if latest_grounding_cand else None
+
                     yield {
                         "type": "final_payload",
                         "raw_response": full_text,
@@ -293,6 +335,7 @@ class GeminiProvider(BaseLlmProvider):
                         "token_usage": int(total_tokens or 0),
                         "model": current_model,
                         "latency_ms": round(latency, 2),
+                        "grounding_metadata": grounding_data,
                     }
                     return
 
@@ -300,6 +343,8 @@ class GeminiProvider(BaseLlmProvider):
                     err_str = str(e).strip() or repr(e) or type(e).__name__
                     last_error = err_str
                     err_lower = f"{err_str} {type(e).__name__}".lower()
+
+
 
                     # If the error was caused by thinking_config being rejected for this model, step down gracefully
                     if "thinking" in err_lower and gen_config.thinking_config is not None:
@@ -322,6 +367,7 @@ class GeminiProvider(BaseLlmProvider):
                         else:
                             gen_config.thinking_config = None
                         continue
+
 
                     is_high_demand_or_unavailable = (
                         "503" in err_lower
@@ -381,8 +427,13 @@ class GeminiProvider(BaseLlmProvider):
                             raw_text_parts = []
                         break
 
-        clean_msg = f"Gemini connection error for '{selected_model}': {last_error}"
+        err_lower = str(last_error).lower()
+        if any(w in err_lower for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
+            clean_msg = "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
+        else:
+            clean_msg = f"Gemini connection error for '{selected_model}': {last_error}"
         raise ProviderException(clean_msg)
+
 
     async def generate(
         self,
@@ -390,10 +441,13 @@ class GeminiProvider(BaseLlmProvider):
         model: Optional[str] = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
+        enable_search: Optional[bool] = None,
         **kwargs: Any,
     ) -> LlmGenerationResult:
         if not self.api_key:
             raise ProviderException("Gemini API key is not configured.")
+
+        tools = None
 
         default_target = getattr(settings, "gemini_model", self.DEFAULT_MODEL) if is_cad_task else getattr(settings, "gemini_fast_model", "gemini-3.5-flash-lite")
         selected_model = self.sanitize_model(model or default_target, is_cad_task=is_cad_task)
@@ -426,6 +480,7 @@ class GeminiProvider(BaseLlmProvider):
                 max_output_tokens=max_tokens,
                 system_instruction=system_instruction,
                 thinking_config=thinking_config,
+                tools=tools,
             )
 
             max_attempts = 2 if not is_fallback else 1
@@ -456,18 +511,25 @@ class GeminiProvider(BaseLlmProvider):
                     usage = getattr(response, "usage_metadata", None)
                     tokens = getattr(usage, "total_token_count", 0) if usage else 0
 
+                    grounding_data = None
+                    if getattr(response, "candidates", None) and len(response.candidates) > 0:
+                        grounding_data = self._extract_grounding_metadata(response.candidates[0])
+
                     return LlmGenerationResult(
                         raw_response=raw_text,
                         token_usage=int(tokens or 0),
                         provider="gemini",
                         model=current_model,
                         latency_ms=round(latency, 2),
+                        grounding_metadata=grounding_data,
                     )
 
                 except Exception as e:
                     err_str = str(e).strip() or repr(e) or type(e).__name__
                     last_error = err_str
                     err_lower = f"{err_str} {type(e).__name__}".lower()
+
+
 
                     # If the error was caused by thinking_config being rejected for this model, step down gracefully
                     if "thinking" in err_lower and gen_config.thinking_config is not None:
@@ -490,6 +552,7 @@ class GeminiProvider(BaseLlmProvider):
                         else:
                             gen_config.thinking_config = None
                         continue
+
 
                     is_high_demand_or_unavailable = (
                         "503" in err_lower
@@ -537,8 +600,13 @@ class GeminiProvider(BaseLlmProvider):
                         )
                         break
 
-        clean_msg = f"Gemini connection error for '{selected_model}': {last_error}"
+        err_lower = str(last_error).lower()
+        if any(w in err_lower for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
+            clean_msg = "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
+        else:
+            clean_msg = f"Gemini connection error for '{selected_model}': {last_error}"
         raise ProviderException(clean_msg)
+
 
     async def is_available(self) -> bool:
         return bool(self.api_key)

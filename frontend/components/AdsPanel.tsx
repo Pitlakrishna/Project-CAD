@@ -1,98 +1,148 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 
 export function AdsPanel() {
+  const [copied, setCopied] = useState(false);
+  const adEmail = "vanaram.industries@gmail.com"
+
+  const handleCopyEmail = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(adEmail);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   return (
     <aside className="w-[280px] lg:w-[300px] h-full bg-[#121212] border-l border-[#262626] flex flex-col shrink-0 z-20 shadow-xl overflow-hidden select-none">
       {/* 1. Header Toolbar */}
       <div className="h-14 px-4 border-b border-[#262626] bg-[#161616] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#242424] text-[#a3a3a3] border border-[#333]">
+          <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#222] text-[#8e8e8e] border border-[#2e2e2e]">
             Ad
           </span>
           <span className="text-xs font-semibold text-[#f4f4f4]">Sponsored</span>
         </div>
         <span className="text-[10px] text-[#666] font-mono uppercase tracking-wider">
-          Partner Ads
+          Empty Slots
         </span>
       </div>
 
-      {/* 2. Scrollable Advertising Content */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3.5">
-        {/* Ad Unit 1: Medium Rectangle (300x250) */}
-        <div className="rounded-2xl bg-[#181818] border border-[#282828] p-3.5 shadow-sm space-y-2.5">
-          <div className="flex items-center justify-between text-[10px] text-[#666]">
-            <span className="uppercase tracking-wider font-mono">Ad • 300x250</span>
-            <span>Featured</span>
-          </div>
-
-          <div className="w-full rounded-xl bg-[#0e0e0e] border border-dashed border-[#2d2d2d] p-4 text-center flex flex-col items-center justify-center space-y-2">
-            <div className="w-8 h-8 rounded-full bg-[#1f1f1f] border border-[#333] flex items-center justify-center text-sm shadow-xs">
-              ⚡
+      {/* 2. Advertising Content - Two Separate Empty Slots + Contact Section */}
+      <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 flex flex-col custom-scrollbar">
+        {/* Empty Ad Slot 1: Top / Medium Rectangle (300x250) */}
+        <div className="rounded-2xl bg-[#161616] border border-[#242424] p-3.5 shadow-sm space-y-2.5">
+          <div className="flex items-center justify-between text-[10px]">
+            <div className="flex items-center gap-1.5 font-mono text-[#8e8e8e]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#404040]" />
+              <span className="uppercase tracking-wider font-semibold">Ad Slot 1</span>
             </div>
-            <div className="text-xs font-semibold text-[#f4f4f4]">
-              Instant 3D Printing & CNC
-            </div>
-            <p className="text-[11px] text-[#7a7a7a] leading-tight max-w-[210px]">
-              Turn your generated Replicad models into real aluminum, resin, and nylon parts.
-            </p>
-            <a
-              href="#quote"
-              onClick={(e) => e.preventDefault()}
-              className="inline-block mt-1 px-3 py-1 rounded-lg bg-[#242424] hover:bg-[#303030] text-[#e0e0e0] hover:text-white text-[11px] font-medium border border-[#383838] transition-colors"
-            >
-              Instant Quote →
-            </a>
-          </div>
-        </div>
-
-        {/* Ad Unit 2: Large Vertical Skyscraper (300x600) */}
-        <div className="rounded-2xl bg-[#181818] border border-[#282828] p-3.5 shadow-sm space-y-2.5">
-          <div className="flex items-center justify-between text-[10px] text-[#666]">
-            <span className="uppercase tracking-wider font-mono">Ad • Skyscraper</span>
-            <span>300x600</span>
-          </div>
-
-          <div className="w-full min-h-[300px] rounded-xl bg-[#0e0e0e] border border-dashed border-[#2d2d2d] p-4 text-center flex flex-col items-center justify-between space-y-3">
-            <div className="w-full text-right">
-              <span className="text-[9px] text-[#555] uppercase font-mono">Ad Slot #2</span>
-            </div>
-
-            <div className="space-y-2 py-2">
-              <div className="w-10 h-10 rounded-xl bg-[#1a1a1a] border border-[#2d2d2d] mx-auto flex items-center justify-center text-lg shadow-xs">
-                🔩
-              </div>
-              <div className="text-xs font-semibold text-[#f4f4f4]">
-                CAD Fasteners & Inserts
-              </div>
-              <p className="text-[11px] text-[#7a7a7a] leading-relaxed max-w-[190px] mx-auto">
-                Stainless M2-M8 hex bolts, threaded heat-set inserts, and silicone O-rings.
-              </p>
-              <div className="inline-block px-3 py-1.5 rounded-lg bg-white hover:bg-neutral-200 text-black text-xs font-semibold transition-colors cursor-pointer shadow-xs">
-                Hardware Shop
-              </div>
-            </div>
-
-            <div className="text-[10px] text-[#4d4d4d] border-t border-[#1c1c1c] pt-2 w-full">
-              Google AdSense banner space
-            </div>
-          </div>
-        </div>
-
-        {/* Ad Unit 3: Partner with Us */}
-        <div className="p-3.5 rounded-2xl bg-[#151515] border border-[#242424] text-center space-y-1.5">
-          <div className="text-xs font-medium text-[#c0c0c0]">Advertise on AICAD</div>
-          <p className="text-[11px] text-[#666] leading-tight">
-            Reach hardware engineers, 3D printing designers, and robotics creators.
-          </p>
-          <div className="pt-1">
-            <span className="text-[11px] text-[#888] hover:text-white underline cursor-pointer">
-              Contact Sales
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#1c1c1c] text-[#666] border border-[#282828]">
+              300 × 250
             </span>
+          </div>
+
+          <div className="w-full min-h-[170px] rounded-xl bg-[#0e0e0e]/80 border border-dashed border-[#282828] p-4 text-center flex flex-col items-center justify-center space-y-2.5">
+            <div className="w-9 h-9 rounded-xl bg-[#171717] border border-[#262626] flex items-center justify-center text-[#555] shadow-xs">
+              <svg
+                className="w-4 h-4 text-[#666]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2.5" strokeWidth="1.5" strokeDasharray="3 3" />
+                <path d="M8 10h8M8 14h5" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-xs font-medium text-[#a3a3a3]">
+                No Ad Available
+              </div>
+              <p className="text-[11px] text-[#555] leading-snug max-w-[200px] mx-auto">
+                This ad placement is currently unoccupied
+              </p>
+            </div>
+            <span className="inline-flex items-center text-[9px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#141414] text-[#555] border border-[#222]">
+              Empty Ad Space
+            </span>
+          </div>
+        </div>
+
+        {/* Empty Ad Slot 2: Bottom / Large Skyscraper (300x600) */}
+        <div className="rounded-2xl bg-[#161616] border border-[#242424] p-3.5 shadow-sm space-y-2.5 flex-1 flex flex-col min-h-[220px]">
+          <div className="flex items-center justify-between text-[10px]">
+            <div className="flex items-center gap-1.5 font-mono text-[#8e8e8e]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#404040]" />
+              <span className="uppercase tracking-wider font-semibold">Ad Slot 2</span>
+            </div>
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[#1c1c1c] text-[#666] border border-[#282828]">
+              300 × 600
+            </span>
+          </div>
+
+          <div className="w-full flex-1 min-h-[170px] rounded-xl bg-[#0e0e0e]/80 border border-dashed border-[#282828] p-4 text-center flex flex-col items-center justify-center space-y-2.5">
+            <div className="w-9 h-9 rounded-xl bg-[#171717] border border-[#262626] flex items-center justify-center text-[#555] shadow-xs">
+              <svg
+                className="w-4 h-4 text-[#666]"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <rect x="4" y="2" width="16" height="20" rx="2.5" strokeWidth="1.5" strokeDasharray="3 3" />
+                <path d="M8 8h8M8 12h8M8 16h4" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-xs font-medium text-[#a3a3a3]">
+                No Ad Available
+              </div>
+              <p className="text-[11px] text-[#555] leading-snug max-w-[200px] mx-auto">
+                This ad placement is currently unoccupied
+              </p>
+            </div>
+            <span className="inline-flex items-center text-[9px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#141414] text-[#555] border border-[#222]">
+              Empty Ad Space
+            </span>
+          </div>
+        </div>
+
+        {/* Contact for Ad Service */}
+        <div className="rounded-2xl bg-gradient-to-b from-[#181818] to-[#131313] border border-[#282828] p-3.5 shadow-sm space-y-3 shrink-0">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.75"
+                  d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"
+                />
+              </svg>
+            </div>
+            <div className="space-y-0.5">
+              <h4 className="text-xs font-semibold text-[#ededed]">Advertise With Us</h4>
+              <p className="text-[11px] text-[#858585] leading-snug">
+                Promote your brand, products, tech tools, or services to our active global audience.
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-0.5 space-y-2">
+            <button
+              onClick={handleCopyEmail}
+              type="button"
+              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[#1a1a1a] hover:bg-[#202020] border border-[#2b2b2b] text-[11px] text-[#999] transition-colors group cursor-pointer"
+            >
+              <span className="font-mono text-[10px] text-[#888] truncate">{adEmail}</span>
+              <span className="text-[10px] text-blue-400 group-hover:text-blue-300 shrink-0 font-medium">
+                {copied ? "Copied!" : "Copy"}
+              </span>
+            </button>
           </div>
         </div>
       </div>
     </aside>
   );
 }
+

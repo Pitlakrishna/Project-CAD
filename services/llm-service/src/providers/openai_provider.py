@@ -76,7 +76,13 @@ class OpenAiProvider(BaseLlmProvider):
                 latency_ms=round(latency, 2),
             )
         except Exception as e:
-            raise ProviderException(f"OpenAI generation failed: {str(e)}") from e
+            err_str = str(e)
+            if any(term in err_str.lower() for term in ["429", "insufficient_quota", "quota", "rate_limit", "rate limit"]):
+                raise ProviderException(
+                    "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
+                ) from e
+            raise ProviderException(f"OpenAI generation failed: {err_str}") from e
+
 
     async def is_available(self) -> bool:
         return bool(self.api_key)

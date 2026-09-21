@@ -23,3 +23,5 @@ class LlmGenerationResult:
     provider: str
     model: str
     latency_ms: float
+    grounding_metadata: Optional[Dict[str, Any]] = None
+

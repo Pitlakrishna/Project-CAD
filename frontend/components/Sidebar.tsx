@@ -18,6 +18,7 @@ const PROVIDER_NAMES: Record<ProviderType, string> = {
   openai: "OpenAI",
   anthropic: "Claude",
   gemini: "Google Gemini",
+  groq: "Groq",
   mock: "OpenAI",
   ollama: "OpenAI",
 };

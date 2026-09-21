@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     gemini_timeout_seconds: float = 60.0
     gemini_thinking_budget_chat: int = 0
     gemini_thinking_budget_cad: int = 512
+    gemini_search_grounding: bool = False
+
+    # Groq Settings (Ultra-fast LPU inference, generous free tier)
+    groq_api_key: Optional[str] = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_fast_model: str = "openai/gpt-oss-20b"
+    groq_timeout_seconds: float = 60.0
 
     # Ollama Settings
     ollama_base_url: str = "http://localhost:11434"

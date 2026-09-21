@@ -70,11 +70,23 @@ async def generate_cad(
             detail=f"Failed to parse valid Replicad TypeScript: {str(e)}",
         )
     except ProviderException as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+        err_msg = str(e)
+        if any(w in err_msg.lower() for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings.",
+            )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=err_msg)
     except Exception as e:
+        err_msg = str(e)
+        if any(w in err_msg.lower() for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings.",
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal generation error: {str(e)}",
+            detail=f"Internal generation error: {err_msg}",
         )
 
 
@@ -113,11 +125,23 @@ async def refine_cad(
             detail=f"Failed to parse refined Replicad TypeScript: {str(e)}",
         )
     except ProviderException as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+        err_msg = str(e)
+        if any(w in err_msg.lower() for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings.",
+            )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=err_msg)
     except Exception as e:
+        err_msg = str(e)
+        if any(w in err_msg.lower() for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings.",
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal refinement error: {str(e)}",
+            detail=f"Internal refinement error: {err_msg}",
         )
 
 
@@ -167,6 +191,8 @@ async def generate_cad_stream(
         except Exception as e:
             logger.exception("Error in generate_cad_stream: %s", e)
             err_msg = str(e).strip() or f"{type(e).__name__}: check LLM provider configuration"
+            if any(w in err_msg.lower() for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
+                err_msg = "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
             yield f"data: {json.dumps({'type': 'error', 'error': err_msg})}\n\n"
 
     sse_headers = {
@@ -205,6 +231,8 @@ async def refine_cad_stream(
         except Exception as e:
             logger.exception("Error in refine_cad_stream: %s", e)
             err_msg = str(e).strip() or f"{type(e).__name__}: check LLM provider configuration"
+            if any(w in err_msg.lower() for w in ["429", "resource_exhausted", "quota", "rate limit", "rate_limit"]):
+                err_msg = "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
             yield f"data: {json.dumps({'type': 'error', 'error': err_msg})}\n\n"
 
     sse_headers = {

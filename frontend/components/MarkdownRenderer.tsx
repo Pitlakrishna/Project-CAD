@@ -29,20 +29,11 @@ function CodeSnippet({ inline, className, children, ...props }: CodeBlockProps) 
     );
   }
 
-  // Do not render Replicad 3D CAD scripts in the chat text response
+  // Only hide actual Replicad 3D CAD model scripts (which are rendered in the 3D viewer)
   const isReplicadScript =
-    codeString.includes("replicad") ||
-    codeString.includes("export default function main") ||
-    codeString.includes("defaultParams") ||
-    codeString.includes("drawRoundedRectangle") ||
-    codeString.includes("makeCylinder") ||
-    codeString.includes("sketchCircle") ||
-    codeString.includes("drawCircle") ||
-    codeString.includes("makeBox") ||
-    codeString.includes("makeSphere") ||
     language === "replicad" ||
-    language === "typescript" ||
-    language === "ts";
+    (codeString.includes("from 'replicad'") || codeString.includes("from \"replicad\"")) ||
+    (codeString.includes("export default function main") && codeString.includes("defaultParams"));
 
   if (isReplicadScript) {
     // Hide raw CAD code completely from chat message text
@@ -104,17 +95,17 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         components={{
           p: ({ children }) => <p className="mb-2.5 last:mb-0 leading-relaxed">{children}</p>,
           h1: ({ children }) => (
-            <h1 className="text-lg font-bold text-white mt-4 mb-2 pb-1 border-b border-[#2b2b2b]">
+            <h1 className="text-base font-bold text-white mt-3.5 mb-1.5">
               {children}
             </h1>
           ),
           h2: ({ children }) => (
-            <h2 className="text-base font-semibold text-white mt-3.5 mb-1.5">
+            <h2 className="text-base font-semibold text-white mt-3 mb-1.5">
               {children}
             </h2>
           ),
           h3: ({ children }) => (
-            <h3 className="text-sm font-semibold text-[#f0f0f0] mt-3 mb-1">
+            <h3 className="text-sm font-semibold text-[#f0f0f0] mt-2.5 mb-1">
               {children}
             </h3>
           ),
@@ -130,7 +121,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
           ),
           li: ({ children }) => <li className="leading-relaxed">{children}</li>,
           blockquote: ({ children }) => (
-            <blockquote className="border-l-2 border-[#404040] pl-3 py-1 my-2 text-[#a3a3a3] italic bg-[#171717]/40 rounded-r">
+            <blockquote className="px-3 py-1.5 my-2 text-[#a3a3a3] italic bg-[#171717]/50 rounded-lg">
               {children}
             </blockquote>
           ),
@@ -148,7 +139,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
             <strong className="font-semibold text-white">{children}</strong>
           ),
           em: ({ children }) => <em className="italic text-[#f4f4f4]">{children}</em>,
-          hr: () => <hr className="my-3.5 border-[#282828]" />,
+          hr: () => <div className="my-2.5" />,
           table: ({ children }) => (
             <div className="overflow-x-auto my-3 rounded-xl border border-[#2b2b2b]">
               <table className="w-full text-xs text-left border-collapse bg-[#141414]">

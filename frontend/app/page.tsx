@@ -11,7 +11,7 @@ import {
   getActiveSessionId,
   setActiveSessionId,
 } from "../lib/storage";
-import { generateCad, refineCad, generateCadStream, refineCadStream } from "../lib/api";
+import { generateCad, refineCad, generateCadStream, refineCadStream, formatErrorMessage } from "../lib/api";
 import { Sidebar } from "../components/Sidebar";
 import { SettingsModal } from "../components/SettingsModal";
 import { AdsPanel } from "../components/AdsPanel";
@@ -165,10 +165,15 @@ export default function Home() {
     return modifyKeywords.some((kw) => text.includes(kw));
   }
 
-  function cleanFinalContent(explanation?: string, streamedContent?: string): string {
+  function cleanFinalContent(explanation?: string, streamedContent?: string, hasReplicadCode?: boolean): string {
     let content = (explanation || streamedContent || "").trim();
-    // Strip any raw code blocks that might have leaked into the explanation
-    content = content.replace(/```(?:typescript|ts|javascript|js|replicad)?[\s\S]*?```/gi, "").trim();
+    // Only strip Replicad 3D CAD scripts if a 3D model was generated (so it doesn't duplicate the 3D viewer)
+    if (hasReplicadCode) {
+      const replicadPattern = /```(?:typescript|ts|javascript|js|replicad)?\s*\n[\s\S]*?(?:export\s+default\s+function|defaultParams|replicad)[\s\S]*?```/gi;
+      const stripped = content.replace(replicadPattern, "").trim();
+      return stripped || explanation || "Here is your 3D CAD model.";
+    }
+    // For general code (Python, JS, HTML, etc.) or chat Q&A, keep all code blocks and markdown intact
     return content;
   }
 
@@ -299,7 +304,7 @@ export default function Home() {
       const finalAssistantMessage: ChatMessage = {
         id: assistantMsgId,
         role: "assistant",
-        content: cleanFinalContent(cadResult.raw_explanation, accumulatedContent),
+        content: cleanFinalContent(cadResult.raw_explanation, accumulatedContent, Boolean(cadResult.replicad_code)),
         isStreaming: false,
         cadResponse: cadResult,
         timestamp: Date.now(),
@@ -320,7 +325,8 @@ export default function Home() {
         return next;
       });
     } catch (err: any) {
-      const errorMsg = err.message || "Unknown error occurred";
+      const rawErrorMsg = err.message || "Unknown error occurred";
+      const userFriendlyMsg = formatErrorMessage(rawErrorMsg, settings.provider);
       setSessions((prev) => {
         const next = prev.map((s) => {
           if (s.id !== targetSessionId) return s;
@@ -333,10 +339,8 @@ export default function Home() {
                   ...m,
                   isThinking: false,
                   isStreaming: false,
-                  error: errorMsg,
-                  content: errorMsg.startsWith("Cannot connect") || errorMsg.startsWith("Network error")
-                    ? errorMsg
-                    : "Generation failed: " + errorMsg,
+                  error: rawErrorMsg,
+                  content: userFriendlyMsg,
                 }
                 : m
             ),
@@ -460,7 +464,7 @@ export default function Home() {
       const finalAssistantMessage: ChatMessage = {
         id: assistantMsgId,
         role: "assistant",
-        content: cleanFinalContent(cadResult.raw_explanation, accumulatedContent),
+        content: cleanFinalContent(cadResult.raw_explanation, accumulatedContent, Boolean(cadResult.replicad_code)),
         isStreaming: false,
         cadResponse: cadResult,
         timestamp: Date.now(),
@@ -481,7 +485,8 @@ export default function Home() {
         return next;
       });
     } catch (err: any) {
-      const errorMsg = err.message || "Unknown error occurred";
+      const rawErrorMsg = err.message || "Unknown error occurred";
+      const userFriendlyMsg = formatErrorMessage(rawErrorMsg, settings.provider);
       setSessions((prev) => {
         const next = prev.map((s) => {
           if (s.id !== targetSessionId) return s;
@@ -494,10 +499,8 @@ export default function Home() {
                   ...m,
                   isThinking: false,
                   isStreaming: false,
-                  error: errorMsg,
-                  content: errorMsg.startsWith("Cannot connect") || errorMsg.startsWith("Network error")
-                    ? errorMsg
-                    : "Generation failed: " + errorMsg,
+                  error: rawErrorMsg,
+                  content: userFriendlyMsg,
                 }
                 : m
             ),
@@ -517,6 +520,8 @@ export default function Home() {
         return "Claude";
       case "gemini":
         return "Gemini";
+      case "groq":
+        return "Groq";
       case "openai":
       default:
         return "OpenAI";
@@ -629,6 +634,7 @@ export default function Home() {
                 message={message}
                 onResubmitPrompt={handleResubmitPrompt}
                 onRefinePrompt={(suggestion) => handleSendMessage(suggestion)}
+                onOpenSettings={() => setIsSettingsOpen(true)}
                 isLoading={isLoading}
               />
             ))}

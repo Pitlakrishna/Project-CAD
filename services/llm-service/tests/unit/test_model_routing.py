@@ -198,3 +198,56 @@ def test_meta_and_informational_not_cad_intent():
     # Explicit 3D CAD design request should trigger CAD generation
     assert ContextBuilder.is_cad_intent("design a phone stand 80mm tall")
     assert ContextBuilder.is_cad_intent("create a 3d model of a cylinder")
+
+
+def test_groq_provider_routing_and_instantiation():
+    from src.providers import get_llm_provider
+    from src.providers.groq_provider import GroqProvider
+
+    # Intent routing for Groq
+    cad_model = CadGenerationService.resolve_effective_model(provider_name="groq", is_cad_task=True)
+    assert cad_model == "llama-3.3-70b-versatile"
+
+    chat_model = CadGenerationService.resolve_effective_model(provider_name="groq", is_cad_task=False)
+    assert chat_model == "openai/gpt-oss-20b"
+
+    # Provider instantiation
+    provider = get_llm_provider("groq", api_key="gsk_test_123")
+    assert isinstance(provider, GroqProvider)
+    assert provider.api_key == "gsk_test_123"
+    assert provider.base_url == "https://api.groq.com/openai/v1"
+
+
+def test_gemini_google_search_grounding_tools():
+    from src.providers.gemini_provider import GeminiProvider
+
+    # Search disabled to prevent 429 quota exhaustion: returns None
+    tools = GeminiProvider._build_tools_config(enable_search=True)
+    assert tools is None
+
+
+
+def test_gemini_grounding_metadata_extraction():
+    from unittest.mock import MagicMock
+    from src.providers.gemini_provider import GeminiProvider
+
+    mock_cand = MagicMock()
+    mock_cand.grounding_metadata.web_search_queries = ["market news today", "sp500 performance"]
+    
+    mock_chunk1 = MagicMock()
+    mock_chunk1.web.title = "Financial Times Market Update"
+    mock_chunk1.web.uri = "https://ft.com/markets"
+
+    mock_chunk2 = MagicMock()
+    mock_chunk2.web.title = "Bloomberg Markets"
+    mock_chunk2.web.uri = "https://bloomberg.com/markets"
+
+    mock_cand.grounding_metadata.grounding_chunks = [mock_chunk1, mock_chunk2]
+
+    metadata = GeminiProvider._extract_grounding_metadata(mock_cand)
+    assert metadata is not None
+    assert "market news today" in metadata["search_queries"]
+    assert len(metadata["sources"]) == 2
+    assert metadata["sources"][0]["title"] == "Financial Times Market Update"
+    assert metadata["sources"][0]["uri"] == "https://ft.com/markets"
+

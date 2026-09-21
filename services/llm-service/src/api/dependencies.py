@@ -72,6 +72,8 @@ def extract_credentials_from_request(request: Request) -> RequestCredentials:
             api_key = headers.get("x-anthropic-api-key")
         elif headers.get("x-gemini-api-key"):
             api_key = headers.get("x-gemini-api-key")
+        elif headers.get("x-groq-api-key"):
+            api_key = headers.get("x-groq-api-key")
 
     return RequestCredentials(
         api_key=api_key or None,

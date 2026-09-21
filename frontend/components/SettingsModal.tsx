@@ -27,7 +27,8 @@ export function SettingsModal({
   const initialProvider: ProviderType =
     settings.selectedProvider === "anthropic" ||
       settings.selectedProvider === "gemini" ||
-      settings.selectedProvider === "openai"
+      settings.selectedProvider === "openai" ||
+      settings.selectedProvider === "groq"
       ? settings.selectedProvider
       : "gemini";
 
@@ -48,7 +49,8 @@ export function SettingsModal({
       const activeP: ProviderType =
         settings.selectedProvider === "anthropic" ||
           settings.selectedProvider === "gemini" ||
-          settings.selectedProvider === "openai"
+          settings.selectedProvider === "openai" ||
+          settings.selectedProvider === "groq"
           ? settings.selectedProvider
           : "gemini";
 
@@ -92,7 +94,9 @@ export function SettingsModal({
       ? formData.openaiApiKey
       : formData.selectedProvider === "anthropic"
         ? formData.anthropicApiKey
-        : formData.geminiApiKey;
+        : formData.selectedProvider === "groq"
+          ? formData.groqApiKey
+          : formData.geminiApiKey;
 
   const hasApiKey = Boolean(currentApiKey && currentApiKey.trim().length > 0);
 
@@ -102,7 +106,9 @@ export function SettingsModal({
       ? formData.openaiModel
       : formData.selectedProvider === "anthropic"
         ? formData.anthropicModel
-        : formData.geminiModel;
+        : formData.selectedProvider === "groq"
+          ? formData.groqModel
+          : formData.geminiModel;
 
   const hasManualOverride = Boolean(
     currentModelOverride &&
@@ -150,12 +156,13 @@ export function SettingsModal({
               )}
             </div>
 
-            <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#121212] rounded-xl border border-[#262626]">
+            <div className="grid grid-cols-4 gap-1.5 p-1 bg-[#121212] rounded-xl border border-[#262626]">
               {(
                 [
                   { id: "gemini", label: "Gemini" },
-                  { id: "anthropic", label: "Claude" },
+                  { id: "groq", label: "Groq (Fast)" },
                   { id: "openai", label: "OpenAI" },
+                  { id: "anthropic", label: "Claude" },
                 ] as const
               ).map((p) => {
                 const isSelected = formData.selectedProvider === p.id;
@@ -310,6 +317,60 @@ export function SettingsModal({
               </div>
             )}
 
+            {/* GROQ */}
+            {formData.selectedProvider === "groq" && (
+              <div className="space-y-3">
+                {/* API Key */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <label className="text-[#a3a3a3] font-medium">Groq API Key</label>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${hasApiKey
+                        ? "bg-emerald-950/60 text-emerald-300 border border-emerald-800/50"
+                        : "bg-neutral-800 text-neutral-400"
+                        }`}
+                    >
+                      {hasApiKey ? "✓ Dynamic Key Active" : "Paste API Key"}
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showKey ? "text" : "password"}
+                      placeholder="gsk_..."
+                      value={formData.groqApiKey}
+                      onChange={(e) => updateSettingsDynamically({ groqApiKey: e.target.value.trim() })}
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData.getData("text").trim();
+                        if (pasted) {
+                          e.preventDefault();
+                          updateSettingsDynamically({ groqApiKey: pasted });
+                        }
+                      }}
+                      className="w-full px-3 py-2 pr-9 rounded-lg bg-[#141414] border border-[#333333] text-xs text-[#f4f4f4] placeholder-[#555] focus:outline-hidden focus:border-[#555] font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#737373] hover:text-[#d1d1d1] cursor-pointer"
+                    >
+                      {showKey ? <IconEyeOff className="w-3.5 h-3.5" /> : <IconEye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-[#737373]">
+                    Free ultra-fast LPU inference (Llama 3.3 70B &amp; OpenAI GPT-OSS 20B). Get a free key at{" "}
+                    <a
+                      href="https://console.groq.com/keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-400 hover:underline"
+                    >
+                      console.groq.com/keys
+                    </a>
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Collapsible Advanced Settings (Model Override & Custom Endpoint) */}
             <div className="pt-1">
               <button
@@ -336,6 +397,7 @@ export function SettingsModal({
                           if (formData.selectedProvider === "openai") updateSettingsDynamically({ openaiModel: "auto" });
                           if (formData.selectedProvider === "anthropic") updateSettingsDynamically({ anthropicModel: "auto" });
                           if (formData.selectedProvider === "gemini") updateSettingsDynamically({ geminiModel: "auto" });
+                          if (formData.selectedProvider === "groq") updateSettingsDynamically({ groqModel: "auto" });
                         }}
                         className="text-[10px] text-blue-400 hover:underline cursor-pointer"
                       >
@@ -350,13 +412,16 @@ export function SettingsModal({
                           ? (formData.openaiModel === "auto" ? "" : formData.openaiModel)
                           : formData.selectedProvider === "anthropic"
                             ? (formData.anthropicModel === "auto" ? "" : formData.anthropicModel)
-                            : (formData.geminiModel === "auto" ? "" : formData.geminiModel)
+                            : formData.selectedProvider === "groq"
+                              ? (formData.groqModel === "auto" ? "" : formData.groqModel)
+                              : (formData.geminiModel === "auto" ? "" : formData.geminiModel)
                       }
                       onChange={(e) => {
                         const val = e.target.value.trim() || "auto";
                         if (formData.selectedProvider === "openai") updateSettingsDynamically({ openaiModel: val });
                         if (formData.selectedProvider === "anthropic") updateSettingsDynamically({ anthropicModel: val });
                         if (formData.selectedProvider === "gemini") updateSettingsDynamically({ geminiModel: val });
+                        if (formData.selectedProvider === "groq") updateSettingsDynamically({ groqModel: val });
                       }}
                       className="w-full px-3 py-1.5 rounded-lg bg-[#1b1b1b] border border-[#333333] text-xs text-[#f4f4f4] placeholder-[#555] font-mono focus:outline-hidden"
                     />

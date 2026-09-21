@@ -5,6 +5,7 @@ from src.config import settings
 from src.providers.anthropic_provider import AnthropicProvider
 from src.providers.base import BaseLlmProvider
 from src.providers.gemini_provider import GeminiProvider
+from src.providers.groq_provider import GroqProvider
 from src.providers.mock_provider import MockLlmProvider
 from src.providers.ollama_provider import OllamaProvider
 from src.providers.openai_provider import OpenAiProvider
@@ -24,6 +25,8 @@ def get_llm_provider(
         return AnthropicProvider(api_key=api_key, base_url=base_url)
     elif name == "gemini":
         return GeminiProvider(api_key=api_key)
+    elif name == "groq":
+        return GroqProvider(api_key=api_key, base_url=base_url)
     elif name == "ollama":
         return OllamaProvider(base_url=base_url)
     elif name == "mock":

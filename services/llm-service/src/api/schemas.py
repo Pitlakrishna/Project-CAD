@@ -48,6 +48,7 @@ class GenerateCadRequest(BaseModel):
     tenant_id: Optional[str] = Field(default=None, description="Tenant identifier")
     user_id: Optional[str] = Field(default="anonymous", description="User identifier")
     constraints: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional dimensional or material constraints")
+    enable_search: Optional[bool] = Field(default=None, description="Enable Google Search Grounding for real-time web information")
 
 
 class RefineCadRequest(BaseModel):
@@ -62,6 +63,7 @@ class RefineCadRequest(BaseModel):
     base_url: Optional[str] = Field(default=None)
     tenant_id: Optional[str] = Field(default=None)
     user_id: Optional[str] = Field(default="anonymous")
+    enable_search: Optional[bool] = Field(default=None, description="Enable Google Search Grounding for real-time web information")
 
 
 class ValidateCadRequest(BaseModel):
@@ -97,6 +99,8 @@ class CadGenerationResponse(BaseModel):
     token_usage: int = Field(default=0, description="Total tokens used in generation")
     cached: bool = Field(default=False, description="Whether the result was served from Redis cache")
     latency_ms: float = Field(default=0.0, description="Execution time in milliseconds")
+    grounding_metadata: Optional[Dict[str, Any]] = Field(default=None, description="Google Search grounding metadata (queries, sources)")
+
 
 
 class HealthResponse(BaseModel):

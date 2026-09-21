@@ -10,6 +10,7 @@ import {
   IconEdit,
   IconClose,
   IconSend,
+  IconGear,
 } from "./icons";
 
 
@@ -17,6 +18,7 @@ interface ChatMessageItemProps {
   message: ChatMessage;
   onResubmitPrompt?: (messageId: string, newText: string) => void;
   onRefinePrompt?: (suggestion: string) => void;
+  onOpenSettings?: () => void;
   isLoading?: boolean;
 }
 
@@ -24,6 +26,7 @@ export function ChatMessageItem({
   message,
   onResubmitPrompt,
   onRefinePrompt,
+  onOpenSettings,
   isLoading,
 }: ChatMessageItemProps) {
   const isUser = message.role === "user";
@@ -85,9 +88,8 @@ export function ChatMessageItem({
 
   return (
     <div
-      className={`group flex gap-3.5 ${
-        isUser ? "justify-end" : "justify-start"
-      } w-full transition-all`}
+      className={`group flex gap-3.5 ${isUser ? "justify-end" : "justify-start"
+        } w-full transition-all`}
     >
       {/* Assistant Avatar */}
       {!isUser && (
@@ -97,11 +99,10 @@ export function ChatMessageItem({
       )}
 
       <div
-        className={`flex flex-col ${
-          isUser
-            ? "max-w-[90%] sm:max-w-[80%] items-end"
-            : "max-w-full flex-1 items-start min-w-0"
-        }`}
+        className={`flex flex-col ${isUser
+          ? "max-w-[90%] sm:max-w-[80%] items-end"
+          : "max-w-full flex-1 items-start min-w-0"
+          }`}
       >
         {isUser ? (
           /* User Message Content */
@@ -201,9 +202,48 @@ export function ChatMessageItem({
           /* Assistant Message Content */
           <div className="w-full text-sm text-[#dcdcdc] leading-relaxed space-y-2.5 min-w-0">
             {message.error ? (
-              <div className="p-4 rounded-xl bg-red-950/30 border border-red-800/40 text-xs text-red-300">
-                {message.content}
-              </div>
+              (() => {
+                const isRateLimit =
+                  (message.content && (
+                    message.content.includes("Rate limit exceeded") ||
+                    message.content.includes("API usage quota")
+                  )) ||
+                  (typeof message.error === "string" && (
+                    message.error.toLowerCase().includes("429") ||
+                    message.error.toLowerCase().includes("resource_exhausted") ||
+                    message.error.toLowerCase().includes("quota") ||
+                    message.error.toLowerCase().includes("rate limit") ||
+                    message.error.toLowerCase().includes("rate_limit")
+                  ));
+
+                if (isRateLimit) {
+                  return (
+                    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 space-y-3">
+                      <div className="flex items-start gap-3">
+                        <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-300 mt-0.5 shrink-0">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-semibold text-amber-300 text-sm">API Quota / Rate Limit Exceeded</span>
+                          </div>
+                          <p className="text-amber-200/90 leading-relaxed text-xs">
+                            You have reached daily limit. Please switch to another provider in Settings or try again tomorrow.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="p-4 rounded-xl bg-red-950/30 border border-red-800/40 text-xs text-red-300">
+                    {message.content}
+                  </div>
+                );
+              })()
             ) : (
               <>
 
@@ -223,6 +263,7 @@ export function ChatMessageItem({
                     </div>
                   ) : null}
                 </div>
+
 
                 {/* Assistant Action Bar: Copy */}
                 {!message.isStreaming && Boolean(message.content) && (
