@@ -6,7 +6,6 @@ from src.providers.anthropic_provider import AnthropicProvider
 from src.providers.base import BaseLlmProvider
 from src.providers.gemini_provider import GeminiProvider
 from src.providers.groq_provider import GroqProvider
-from src.providers.mock_provider import MockLlmProvider
 from src.providers.ollama_provider import OllamaProvider
 from src.providers.openai_provider import OpenAiProvider
 
@@ -29,10 +28,6 @@ def get_llm_provider(
         return GroqProvider(api_key=api_key, base_url=base_url)
     elif name == "ollama":
         return OllamaProvider(base_url=base_url)
-    elif name == "mock":
-        return MockLlmProvider()
     else:
-        # Fallback to mock for unknown provider in dev mode
-        if settings.debug:
-            return MockLlmProvider()
         raise ValueError(f"Unsupported LLM provider '{name}'")
+

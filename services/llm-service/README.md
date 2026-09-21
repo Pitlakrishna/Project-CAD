@@ -7,10 +7,11 @@ The **LLM Service** translates natural language prompts into parametric 3D CAD m
 - **Physical Materials & Glass Optics**: Generates multi-part assemblies with colors (`#hex`), physical materials (`metal`, `plastic`, `wood`, `rubber`), and glass parameters (`opacity`, `transmission`, `roughness`, `ior`).
 - **Parametric Sliders**: Exports strongly-typed `defaultParams` suitable for dynamic UI slider bindings in Three.js CAD viewers.
 - **Multi-Provider Support**: Pluggable support for:
+  - `gemini` (Google Gemini 2.5/3.5/3.8 Flash)
+  - `groq` (Ultra-fast LPU inference)
   - `openai` (GPT-4o, GPT-4 Turbo)
   - `anthropic` (Claude 3.5 Sonnet)
   - `ollama` (Local models: DeepSeek-Coder, Llama 3)
-  - `mock` (Deterministic local provider for offline testing with zero API keys)
 - **Sanitizer & Parser**: Strips markdown, validates Replicad AST exports, and extracts assembly parts metadata.
 - **Caching & Event-Driven**: Caches prompt hashes in Redis and publishes `LlmCodeGeneratedPayload` to RabbitMQ.
 

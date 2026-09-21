@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     port: int = 8000
     host: str = "0.0.0.0"
 
-    # LLM Provider: 'openai' | 'anthropic' | 'ollama' | 'mock'
-    llm_provider: str = "mock"
+    # LLM Provider: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama'
+    llm_provider: str = "gemini"
 
     # OpenAI Settings
     openai_api_key: Optional[str] = None

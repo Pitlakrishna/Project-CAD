@@ -326,7 +326,7 @@ export default function Home() {
       });
     } catch (err: any) {
       const rawErrorMsg = err.message || "Unknown error occurred";
-      const userFriendlyMsg = formatErrorMessage(rawErrorMsg, settings.provider);
+      const userFriendlyMsg = formatErrorMessage(rawErrorMsg, settings.selectedProvider);
       setSessions((prev) => {
         const next = prev.map((s) => {
           if (s.id !== targetSessionId) return s;
@@ -486,7 +486,7 @@ export default function Home() {
       });
     } catch (err: any) {
       const rawErrorMsg = err.message || "Unknown error occurred";
-      const userFriendlyMsg = formatErrorMessage(rawErrorMsg, settings.provider);
+      const userFriendlyMsg = formatErrorMessage(rawErrorMsg, settings.selectedProvider);
       setSessions((prev) => {
         const next = prev.map((s) => {
           if (s.id !== targetSessionId) return s;

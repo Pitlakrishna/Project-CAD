@@ -14,7 +14,7 @@ def test_health_check(client: TestClient):
 def test_generate_cad_endpoint(client: TestClient):
     payload = {
         "prompt": "Create an electronics junction box with a clear glass inspection lid and stainless steel fasteners",
-        "provider": "mock",
+        "provider": "gemini",
         "user_id": "test-user-123",
     }
     response = client.post("/api/v1/llm/generate", json=payload)
@@ -77,7 +77,7 @@ def test_refine_cad_endpoint(client: TestClient):
         "prompt": "Make the glass lid 5mm thicker",
         "previous_code": "export const defaultParams = { h: 10 }; export default function main() { return []; }",
         "previous_parameters": {"h": 10},
-        "provider": "mock",
+        "provider": "gemini",
     }
     response = client.post("/api/v1/llm/refine", json=payload)
     assert response.status_code == 200
@@ -86,16 +86,15 @@ def test_refine_cad_endpoint(client: TestClient):
     assert "prompt_id" in data
 
 
-def test_verify_key_mock_provider(client: TestClient):
+def test_verify_key_unsupported_provider(client: TestClient):
     payload = {
-        "provider": "mock",
+        "provider": "nonexistent_provider",
     }
     response = client.post("/api/v1/llm/verify-key", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert data["valid"] is True
-    assert data["provider"] == "mock"
-    assert "ready" in data["message"].lower()
+    assert data["valid"] is False
+    assert "unsupported" in data["message"].lower()
 
 
 def test_verify_key_missing_credentials(client: TestClient):
@@ -115,20 +114,20 @@ def test_generate_with_header_credentials(client: TestClient):
         "prompt": "Create an electronics junction box with clear lid",
     }
     headers = {
-        "X-Provider": "mock",
-        "X-API-Key": "test-mock-key",
+        "X-Provider": "gemini",
+        "X-API-Key": "test-key",
     }
     response = client.post("/api/v1/llm/generate", json=payload, headers=headers)
     assert response.status_code == 200
     data = response.json()
-    assert data["provider"] == "mock"
+    assert data["provider"] == "gemini"
     assert "replicad_code" in data
 
 
 def test_generate_cad_stream_endpoint(client: TestClient):
     payload = {
         "prompt": "Create an aluminum bracket with 4 mounting holes",
-        "provider": "mock",
+        "provider": "gemini",
     }
     response = client.post("/api/v1/llm/generate/stream", json=payload)
     assert response.status_code == 200
@@ -141,7 +140,7 @@ def test_generate_cad_stream_endpoint(client: TestClient):
 def test_generate_stream_normal_prompt_greeting(client: TestClient):
     payload = {
         "prompt": "hi",
-        "provider": "mock",
+        "provider": "gemini",
     }
     response = client.post("/api/v1/llm/generate/stream", json=payload)
     assert response.status_code == 200
