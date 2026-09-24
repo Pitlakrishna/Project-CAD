@@ -28,7 +28,8 @@ export function SettingsModal({
     settings.selectedProvider === "anthropic" ||
       settings.selectedProvider === "gemini" ||
       settings.selectedProvider === "openai" ||
-      settings.selectedProvider === "groq"
+      settings.selectedProvider === "groq" ||
+      settings.selectedProvider === "deepseek"
       ? settings.selectedProvider
       : "gemini";
 
@@ -50,7 +51,8 @@ export function SettingsModal({
         settings.selectedProvider === "anthropic" ||
           settings.selectedProvider === "gemini" ||
           settings.selectedProvider === "openai" ||
-          settings.selectedProvider === "groq"
+          settings.selectedProvider === "groq" ||
+          settings.selectedProvider === "deepseek"
           ? settings.selectedProvider
           : "gemini";
 
@@ -96,7 +98,9 @@ export function SettingsModal({
         ? formData.anthropicApiKey
         : formData.selectedProvider === "groq"
           ? formData.groqApiKey
-          : formData.geminiApiKey;
+          : formData.selectedProvider === "deepseek"
+            ? formData.deepseekApiKey
+            : formData.geminiApiKey;
 
   const hasApiKey = Boolean(currentApiKey && currentApiKey.trim().length > 0);
 
@@ -108,7 +112,9 @@ export function SettingsModal({
         ? formData.anthropicModel
         : formData.selectedProvider === "groq"
           ? formData.groqModel
-          : formData.geminiModel;
+          : formData.selectedProvider === "deepseek"
+            ? formData.deepseekModel
+            : formData.geminiModel;
 
   const hasManualOverride = Boolean(
     currentModelOverride &&
@@ -156,11 +162,12 @@ export function SettingsModal({
               )}
             </div>
 
-            <div className="grid grid-cols-4 gap-1.5 p-1 bg-[#121212] rounded-xl border border-[#262626]">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1 bg-[#121212] rounded-xl border border-[#262626]">
               {(
                 [
                   { id: "gemini", label: "Gemini" },
                   { id: "groq", label: "Groq (Fast)" },
+                  { id: "deepseek", label: "DeepSeek" },
                   { id: "openai", label: "OpenAI" },
                   { id: "anthropic", label: "Claude" },
                 ] as const
@@ -371,6 +378,60 @@ export function SettingsModal({
               </div>
             )}
 
+            {/* DEEPSEEK */}
+            {formData.selectedProvider === "deepseek" && (
+              <div className="space-y-3">
+                {/* API Key */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <label className="text-[#a3a3a3] font-medium">DeepSeek API Key</label>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${hasApiKey
+                        ? "bg-emerald-950/60 text-emerald-300 border border-emerald-800/50"
+                        : "bg-neutral-800 text-neutral-400"
+                        }`}
+                    >
+                      {hasApiKey ? "✓ Dynamic Key Active" : "Paste API Key"}
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showKey ? "text" : "password"}
+                      placeholder="sk-..."
+                      value={formData.deepseekApiKey}
+                      onChange={(e) => updateSettingsDynamically({ deepseekApiKey: e.target.value.trim() })}
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData.getData("text").trim();
+                        if (pasted) {
+                          e.preventDefault();
+                          updateSettingsDynamically({ deepseekApiKey: pasted });
+                        }
+                      }}
+                      className="w-full px-3 py-2 pr-9 rounded-lg bg-[#141414] border border-[#333333] text-xs text-[#f4f4f4] placeholder-[#555] focus:outline-hidden focus:border-[#555] font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#737373] hover:text-[#d1d1d1] cursor-pointer"
+                    >
+                      {showKey ? <IconEyeOff className="w-3.5 h-3.5" /> : <IconEye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-[#737373]">
+                    High-performance coding with DeepSeek-V3 &amp; reasoning with DeepSeek-R1. Get your key at{" "}
+                    <a
+                      href="https://platform.deepseek.com/api_keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-400 hover:underline"
+                    >
+                      platform.deepseek.com/api_keys
+                    </a>
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Collapsible Advanced Settings (Model Override & Custom Endpoint) */}
             <div className="pt-1">
               <button
@@ -398,6 +459,7 @@ export function SettingsModal({
                           if (formData.selectedProvider === "anthropic") updateSettingsDynamically({ anthropicModel: "auto" });
                           if (formData.selectedProvider === "gemini") updateSettingsDynamically({ geminiModel: "auto" });
                           if (formData.selectedProvider === "groq") updateSettingsDynamically({ groqModel: "auto" });
+                          if (formData.selectedProvider === "deepseek") updateSettingsDynamically({ deepseekModel: "auto" });
                         }}
                         className="text-[10px] text-blue-400 hover:underline cursor-pointer"
                       >
@@ -414,7 +476,9 @@ export function SettingsModal({
                             ? (formData.anthropicModel === "auto" ? "" : formData.anthropicModel)
                             : formData.selectedProvider === "groq"
                               ? (formData.groqModel === "auto" ? "" : formData.groqModel)
-                              : (formData.geminiModel === "auto" ? "" : formData.geminiModel)
+                              : formData.selectedProvider === "deepseek"
+                                ? (formData.deepseekModel === "auto" ? "" : formData.deepseekModel)
+                                : (formData.geminiModel === "auto" ? "" : formData.geminiModel)
                       }
                       onChange={(e) => {
                         const val = e.target.value.trim() || "auto";
@@ -422,22 +486,26 @@ export function SettingsModal({
                         if (formData.selectedProvider === "anthropic") updateSettingsDynamically({ anthropicModel: val });
                         if (formData.selectedProvider === "gemini") updateSettingsDynamically({ geminiModel: val });
                         if (formData.selectedProvider === "groq") updateSettingsDynamically({ groqModel: val });
+                        if (formData.selectedProvider === "deepseek") updateSettingsDynamically({ deepseekModel: val });
                       }}
                       className="w-full px-3 py-1.5 rounded-lg bg-[#1b1b1b] border border-[#333333] text-xs text-[#f4f4f4] placeholder-[#555] font-mono focus:outline-hidden"
                     />
                   </div>
 
-                  {/* Custom Base URL (for OpenAI compatible like DeepSeek / OpenRouter / Groq) */}
-                  {formData.selectedProvider === "openai" && (
+                  {/* Custom Base URL (for OpenAI / DeepSeek compatible endpoints) */}
+                  {(formData.selectedProvider === "openai" || formData.selectedProvider === "deepseek") && (
                     <div className="space-y-1">
                       <label className="block text-[11px] text-[#a3a3a3]">
-                        Custom Base URL <span className="text-[#666]">(e.g. https://api.deepseek.com/v1)</span>
+                        Custom Base URL <span className="text-[#666]">{formData.selectedProvider === "deepseek" ? "(default: https://api.deepseek.com)" : "(e.g. https://api.deepseek.com/v1)"}</span>
                       </label>
                       <input
                         type="text"
-                        placeholder="https://api.openai.com/v1"
-                        value={formData.openaiBaseUrl}
-                        onChange={(e) => updateSettingsDynamically({ openaiBaseUrl: e.target.value.trim() })}
+                        placeholder={formData.selectedProvider === "deepseek" ? "https://api.deepseek.com" : "https://api.openai.com/v1"}
+                        value={formData.selectedProvider === "deepseek" ? formData.deepseekBaseUrl : formData.openaiBaseUrl}
+                        onChange={(e) => {
+                          if (formData.selectedProvider === "deepseek") updateSettingsDynamically({ deepseekBaseUrl: e.target.value.trim() });
+                          else updateSettingsDynamically({ openaiBaseUrl: e.target.value.trim() });
+                        }}
                         className="w-full px-3 py-1.5 rounded-lg bg-[#1b1b1b] border border-[#333333] text-xs text-[#f4f4f4] placeholder-[#555] font-mono focus:outline-hidden"
                       />
                     </div>

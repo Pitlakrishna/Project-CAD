@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class GeminiProvider(BaseLlmProvider):
     """Google Gemini API connector using the exact model selected by the user."""
 
-    DEFAULT_MODEL = "gemini-3.8-flash"
+    DEFAULT_MODEL = "gemini-2.5-flash"
     BANNED_MODELS = GEMINI_BANNED_MODELS
 
     def __init__(self, api_key: Optional[str] = None):
@@ -35,9 +35,10 @@ class GeminiProvider(BaseLlmProvider):
             try:
                 from google import genai
                 from google.genai import types
+                timeout_ms = float(getattr(settings, "gemini_timeout_seconds", 180.0) * 1000.0)
                 self._client = genai.Client(
                     api_key=self.api_key,
-                    http_options=types.HttpOptions(timeout=60000.0),
+                    http_options=types.HttpOptions(timeout=timeout_ms),
                 )
             except Exception as e:
                 logger.warning("Could not initialize Gemini client: %s", e)
@@ -83,18 +84,9 @@ class GeminiProvider(BaseLlmProvider):
 
     @classmethod
     def _build_thinking_config(cls, is_cad_task: bool, current_model: str):
-        """Configure thinking parameters:
-        1. Conversational Chat (Target: Sub-Second <0.8s):
-           For Gemini 3.x models (gemini-3.5-flash-lite, 3.7, 3.8):
-             Set thinking_level to 'minimal' or 'low' to completely eliminate
-             internal reasoning deliberation and emit tokens immediately (<0.5s).
-           For Gemini 2.5 / legacy models:
-             Set thinking_budget = 0.
-        2. 3D CAD Generation (Target: ~2–3s):
-           For Gemini 3.x models:
-             Set thinking_level to 'low' for fast geometric correctness without 30s stalls.
-           For Gemini 2.5 / legacy models:
-             Set thinking_budget = 512.
+        """Configure thinking parameters for Gemini models.
+        - CAD task: budget of ~1024 tokens with include_thoughts=True for spatial reasoning and parametric code design.
+        - Conversational chat: thinking is disabled (thinking_budget=0) for maximum speed and zero overhead.
         """
         try:
             from google.genai import types
@@ -103,51 +95,27 @@ class GeminiProvider(BaseLlmProvider):
             if any(legacy in model_lower for legacy in ["1.5-flash", "1.5-pro", "1.0"]):
                 return None
 
-            is_gemini_3 = any(v in model_lower for v in ["3.5", "3.7", "3.8", "3."])
-
             if not is_cad_task:
-                # 1. Chat: Turn off/minimize thinking completely for sub-second (<0.5s) response
-                if is_gemini_3:
-                    # Use 'low' thinking level which is supported by all Gemini 3 models (3.7, 3.8, 3.5)
-                    try:
-                        tl = getattr(getattr(types, "ThinkingLevel", None), "LOW", "low")
-                        return types.ThinkingConfig(thinking_level=tl)
-                    except Exception:
-                        try:
-                            return types.ThinkingConfig(thinking_budget=0)
-                        except Exception:
-                            return None
-                else:
-                    # Legacy Gemini 2.5 uses thinking_budget=0
-                    try:
-                        return types.ThinkingConfig(thinking_budget=0)
-                    except Exception:
-                        try:
-                            return types.ThinkingConfig(thinking_level="low")
-                        except Exception:
-                            return None
-            else:
-                # 2. 3D CAD Generation: Target ~2–3s
-                if is_gemini_3:
-                    try:
-                        tl = getattr(getattr(types, "ThinkingLevel", None), "LOW", "low")
-                        return types.ThinkingConfig(thinking_level=tl)
-                    except Exception:
-                        try:
-                            return types.ThinkingConfig(thinking_budget=512)
-                        except Exception:
-                            return None
-                else:
-                    budget = int(getattr(settings, "gemini_thinking_budget_cad", 512) or 512)
-                    if budget > 512:
-                        budget = 512
+                # Normal chat does not need thinking and must be ultra-fast!
+                try:
+                    return types.ThinkingConfig(thinking_budget=0)
+                except Exception:
+                    return None
+
+            budget = int(getattr(settings, "gemini_thinking_budget_cad", 1024) or 1024)
+
+            # Try thinking_budget first with include_thoughts=True (required by google-genai to stream thought tokens)
+            try:
+                return types.ThinkingConfig(thinking_budget=budget, include_thoughts=True)
+            except Exception:
+                try:
+                    tl = getattr(getattr(types, "ThinkingLevel", None), "LOW", "low")
+                    return types.ThinkingConfig(thinking_level=tl, include_thoughts=True)
+                except Exception:
                     try:
                         return types.ThinkingConfig(thinking_budget=budget)
                     except Exception:
-                        try:
-                            return types.ThinkingConfig(thinking_level="low")
-                        except Exception:
-                            return None
+                        return None
         except Exception as e:
             logger.warning("Could not build thinking_config for '%s': %s", current_model, e)
             return None
@@ -214,7 +182,8 @@ class GeminiProvider(BaseLlmProvider):
         from google import genai
         from google.genai import types
 
-        http_opts = types.HttpOptions(timeout=60000.0)
+        timeout_ms = float(getattr(settings, "gemini_timeout_seconds", 180.0) * 1000.0)
+        http_opts = types.HttpOptions(timeout=timeout_ms)
         client = self._client or genai.Client(api_key=self.api_key, http_options=http_opts)
         system_instruction, formatted_contents = self._prepare_payload(messages)
 
@@ -246,6 +215,7 @@ class GeminiProvider(BaseLlmProvider):
             for attempt in range(max_attempts):
                 model_start_time = time.perf_counter()
                 raw_text_parts = []
+                accumulated_thoughts = []
                 total_tokens = 0
                 latest_grounding_cand = None
                 try:
@@ -273,6 +243,7 @@ class GeminiProvider(BaseLlmProvider):
                                     is_thought = getattr(part, "thought", False)
                                     text_val = getattr(part, "text", None) or ""
                                     if is_thought and text_val:
+                                        accumulated_thoughts.append(text_val)
                                         yield {"type": "thought", "content": text_val}
                                     elif not is_thought and text_val:
                                         raw_text_parts.append(text_val)
@@ -294,7 +265,7 @@ class GeminiProvider(BaseLlmProvider):
                     yield {
                         "type": "final_payload",
                         "raw_response": full_text,
-                        "raw_thoughts": "",
+                        "raw_thoughts": "".join(accumulated_thoughts),
                         "token_usage": int(total_tokens or 0),
                         "model": current_model,
                         "latency_ms": round(latency, 2),
@@ -334,6 +305,10 @@ class GeminiProvider(BaseLlmProvider):
 
                     is_high_demand_or_unavailable = (
                         "503" in err_lower
+                        or "504" in err_lower
+                        or "deadline" in err_lower
+                        or "deadline_exceeded" in err_lower
+                        or "deadline expired" in err_lower
                         or "unavailable" in err_lower
                         or "high demand" in err_lower
                         or "overloaded" in err_lower
@@ -347,14 +322,15 @@ class GeminiProvider(BaseLlmProvider):
 
                     if is_high_demand_or_unavailable and remaining_fallbacks:
                         logger.warning(
-                            "Gemini stream '%s' hit high demand / 503 (%s). Resetting stream and falling back immediately to '%s'...",
+                            "Gemini stream '%s' hit high demand / timeout / 504 (%s). Resetting stream and falling back immediately to '%s'...",
                             current_model,
                             err_str[:120],
                             remaining_fallbacks[0],
                         )
-                        if len(raw_text_parts) > 0:
+                        if len(raw_text_parts) > 0 or len(accumulated_thoughts) > 0:
                             yield {"type": "reset"}
                             raw_text_parts = []
+                            accumulated_thoughts = []
                         break
 
                     is_retryable = (
@@ -362,6 +338,7 @@ class GeminiProvider(BaseLlmProvider):
                         or "network" in err_lower
                         or "connect" in err_lower
                         or "timeout" in err_lower
+                        or "timed out" in err_lower
                         or "socket" in err_lower
                         or "connection" in err_lower
                     )
@@ -413,7 +390,8 @@ class GeminiProvider(BaseLlmProvider):
         from google import genai
         from google.genai import types
 
-        http_opts = types.HttpOptions(timeout=60000.0)
+        timeout_ms = float(getattr(settings, "gemini_timeout_seconds", 180.0) * 1000.0)
+        http_opts = types.HttpOptions(timeout=timeout_ms)
         client = self._client or genai.Client(api_key=self.api_key, http_options=http_opts)
         system_instruction, formatted_contents = self._prepare_payload(messages)
 
@@ -469,8 +447,13 @@ class GeminiProvider(BaseLlmProvider):
                     tokens = getattr(usage, "total_token_count", 0) if usage else 0
 
                     grounding_data = None
+                    raw_thoughts = ""
                     if getattr(response, "candidates", None) and len(response.candidates) > 0:
-                        grounding_data = self._extract_grounding_metadata(response.candidates[0])
+                        cand = response.candidates[0]
+                        grounding_data = self._extract_grounding_metadata(cand)
+                        if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
+                            th_list = [getattr(p, "text", "") or "" for p in cand.content.parts if getattr(p, "thought", False)]
+                            raw_thoughts = "".join(th_list)
 
                     return LlmGenerationResult(
                         raw_response=raw_text,
@@ -479,6 +462,7 @@ class GeminiProvider(BaseLlmProvider):
                         model=current_model,
                         latency_ms=round(latency, 2),
                         grounding_metadata=grounding_data,
+                        raw_thoughts=raw_thoughts,
                     )
 
                 except Exception as e:
@@ -513,6 +497,10 @@ class GeminiProvider(BaseLlmProvider):
 
                     is_high_demand_or_unavailable = (
                         "503" in err_lower
+                        or "504" in err_lower
+                        or "deadline" in err_lower
+                        or "deadline_exceeded" in err_lower
+                        or "deadline expired" in err_lower
                         or "unavailable" in err_lower
                         or "high demand" in err_lower
                         or "overloaded" in err_lower
@@ -525,7 +513,7 @@ class GeminiProvider(BaseLlmProvider):
 
                     if is_high_demand_or_unavailable and remaining_fallbacks:
                         logger.warning(
-                            "Gemini generate '%s' hit high demand / 503 (%s). Falling back immediately to '%s'...",
+                            "Gemini generate '%s' hit high demand / timeout / 504 (%s). Falling back immediately to '%s'...",
                             current_model,
                             err_str[:120],
                             remaining_fallbacks[0],
@@ -537,6 +525,7 @@ class GeminiProvider(BaseLlmProvider):
                         or "network" in err_lower
                         or "connect" in err_lower
                         or "timeout" in err_lower
+                        or "timed out" in err_lower
                     )
 
                     if is_retryable and attempt < max_attempts - 1:

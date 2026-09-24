@@ -533,7 +533,7 @@ ai-cad-platform/
 │   │       ├── exceptions/
 │   │       └── observability/
 │   │
-│   ├── go-common/
+│   ├── go-common/gRPC 
 │   │   ├── go.mod
 │   │   ├── README.md
 │   │   └── pkg/

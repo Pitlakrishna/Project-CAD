@@ -1,23 +1,28 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 
 from src.config import settings
 from src.domain.models import LlmGenerationResult
 from src.core.base import BaseLlmProvider
 from src.core.common import (
+    StreamThoughtExtractor,
     create_generation_result,
+    create_stream_final_payload,
     execute_with_model_fallback,
+    handle_provider_error,
 )
+from src.core.models import get_models_to_try, is_retryable_model_error
 
 logger = logging.getLogger(__name__)
 
 
 class OllamaProvider(BaseLlmProvider):
-    """Local Ollama instance connector."""
+    """Local Ollama instance connector supporting streaming and thought extraction (DeepSeek-R1, QwQ)."""
 
     def __init__(self, base_url: Optional[str] = None):
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
@@ -53,7 +58,17 @@ class OllamaProvider(BaseLlmProvider):
             call_fn=_call,
         )
 
-        content = data.get("message", {}).get("content", "")
+        msg = data.get("message", {})
+        content = msg.get("content", "")
+        reasoning = msg.get("thinking", "") or ""
+
+        if "<think>" in content and "</think>" in content:
+            before, _, rest = content.partition("<think>")
+            th, _, after = rest.partition("</think>")
+            if not reasoning:
+                reasoning = th.strip()
+            content = (before + after).strip()
+
         eval_count = data.get("eval_count", 0) + data.get("prompt_eval_count", 0)
         return create_generation_result(
             raw_response=content,
@@ -61,7 +76,88 @@ class OllamaProvider(BaseLlmProvider):
             model=used_model,
             start_time=start_time,
             token_usage=eval_count,
+            raw_thoughts=reasoning,
         )
+
+    async def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        model: Optional[str] = None,
+        temperature: float = 0.2,
+        is_cad_task: bool = True,
+        **kwargs: Any,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        start_time = time.perf_counter()
+        models_to_try = get_models_to_try("ollama", requested_model=model, is_cad_task=is_cad_task)
+        last_error: Optional[Exception] = None
+
+        for current_model in models_to_try:
+            yielded_any = False
+            try:
+                if current_model != models_to_try[0]:
+                    logger.info("Ollama stream: falling back from '%s' to '%s'", models_to_try[0], current_model)
+
+                payload = {
+                    "model": current_model,
+                    "messages": messages,
+                    "stream": True,
+                    "options": {
+                        "temperature": temperature,
+                    },
+                }
+
+                accumulated_tokens: List[str] = []
+                accumulated_thoughts: List[str] = []
+                thought_extractor = StreamThoughtExtractor()
+
+                async with httpx.AsyncClient(timeout=settings.ollama_timeout_seconds) as client:
+                    async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line or not line.strip():
+                                continue
+                            try:
+                                chunk_data = json.loads(line)
+                            except Exception:
+                                continue
+
+                            msg = chunk_data.get("message", {})
+                            # Check explicit thinking property
+                            th_delta = msg.get("thinking")
+                            if th_delta:
+                                accumulated_thoughts.append(th_delta)
+                                yielded_any = True
+                                yield {"type": "thought", "content": th_delta}
+
+                            # Check content text with <think> tag extraction
+                            chunk_text = msg.get("content", "")
+                            if chunk_text:
+                                yielded_any = True
+                                for kind, text in thought_extractor.feed(chunk_text):
+                                    if kind == "thought":
+                                        accumulated_thoughts.append(text)
+                                        yield {"type": "thought", "content": text}
+                                    else:
+                                        accumulated_tokens.append(text)
+                                        yield {"type": "token", "content": text}
+
+                full_text = "".join(accumulated_tokens)
+                full_thoughts = "".join(accumulated_thoughts)
+                yield create_stream_final_payload(
+                    raw_response=full_text,
+                    raw_thoughts=full_thoughts,
+                    model=current_model,
+                    start_time=start_time,
+                )
+                return
+            except Exception as e:
+                last_error = e
+                if not yielded_any and is_retryable_model_error(e) and current_model != models_to_try[-1]:
+                    logger.warning("Ollama stream model '%s' failed (%s). Retrying with next fallback model...", current_model, e)
+                    continue
+                break
+
+        handle_provider_error("ollama", last_error, action="stream")
 
     async def is_available(self) -> bool:
         try:

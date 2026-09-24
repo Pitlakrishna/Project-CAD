@@ -72,12 +72,52 @@ def extract_system_and_messages(messages: List[Dict[str, str]]) -> tuple[str, Li
     return "\n\n".join(system_parts).strip(), chat_messages
 
 
+class StreamThoughtExtractor:
+    """Extracts <think>...</think> tags on the fly from an incoming token stream.
+    
+    Yields events as ('thought', text) or ('token', text) so that thought reasoning
+    is neatly routed to the client and never leaks into raw response / CAD parsing.
+    """
+
+    def __init__(self) -> None:
+        self.in_thought = False
+
+    def feed(self, chunk: str) -> List[tuple[str, str]]:
+        if not chunk:
+            return []
+        events: List[tuple[str, str]] = []
+        text = chunk
+        while text:
+            if not self.in_thought:
+                if "<think>" in text:
+                    before, _, after = text.partition("<think>")
+                    if before:
+                        events.append(("token", before))
+                    self.in_thought = True
+                    text = after
+                else:
+                    events.append(("token", text))
+                    text = ""
+            else:
+                if "</think>" in text:
+                    thought_text, _, after = text.partition("</think>")
+                    if thought_text:
+                        events.append(("thought", thought_text))
+                    self.in_thought = False
+                    text = after
+                else:
+                    events.append(("thought", text))
+                    text = ""
+        return events
+
+
 def create_generation_result(
     raw_response: str,
     provider: str,
     model: str,
     start_time: float,
     token_usage: Optional[int] = None,
+    raw_thoughts: str = "",
 ) -> LlmGenerationResult:
     """Constructs a typed LlmGenerationResult with elapsed latency in milliseconds."""
     latency = (time.perf_counter() - start_time) * 1000
@@ -88,6 +128,7 @@ def create_generation_result(
         provider=provider.lower().strip(),
         model=model,
         latency_ms=round(latency, 2),
+        raw_thoughts=raw_thoughts,
     )
 
 
@@ -116,9 +157,16 @@ def handle_provider_error(
     error: Optional[Exception],
     action: str = "generation",
 ) -> NoReturn:
-    """Translates provider exceptions, raising user-friendly rate limit error if applicable."""
+    """Translates provider exceptions, raising user-friendly rate limit or timeout error if applicable."""
     p_name = provider_name.capitalize()
     err_str = str(error) if error else "Unknown error"
+    err_lower = err_str.lower()
+
+    if any(sig in err_lower for sig in ("504", "deadline_exceeded", "deadline expired", "timed out", "timeout")):
+        raise ProviderException(
+            f"Upstream provider timeout (504 Deadline Exceeded): {p_name} took longer than expected to complete. Please retry or select another model/provider in Settings."
+        ) from error
+
     if error and is_retryable_model_error(error):
         raise ProviderException(
             "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."

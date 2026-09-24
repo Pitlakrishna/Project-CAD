@@ -8,6 +8,7 @@ from src.config import settings
 from src.domain.models import LlmGenerationResult
 from src.core.base import BaseLlmProvider
 from src.core.common import (
+    StreamThoughtExtractor,
     create_generation_result,
     create_stream_final_payload,
     execute_with_model_fallback,
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class GroqProvider(BaseLlmProvider):
-    """Groq API connector for ultra-fast LPU inference (Llama 3.3, Llama 3.1)."""
+    """Groq API connector for ultra-fast LPU inference (Llama 3.3, DeepSeek-R1-distill)."""
 
     DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 
@@ -67,7 +68,16 @@ class GroqProvider(BaseLlmProvider):
             call_fn=_call,
         )
 
-        content = response.choices[0].message.content or ""
+        msg = response.choices[0].message
+        content = msg.content or ""
+        reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", "") or ""
+        if "<think>" in content and "</think>" in content:
+            before, _, rest = content.partition("<think>")
+            th, _, after = rest.partition("</think>")
+            if not reasoning:
+                reasoning = th.strip()
+            content = (before + after).strip()
+
         tokens = response.usage.total_tokens if response.usage else 0
         return create_generation_result(
             raw_response=content,
@@ -75,6 +85,7 @@ class GroqProvider(BaseLlmProvider):
             model=used_model,
             start_time=start_time,
             token_usage=tokens,
+            raw_thoughts=reasoning,
         )
 
     async def generate_stream(
@@ -106,17 +117,35 @@ class GroqProvider(BaseLlmProvider):
                 )
 
                 accumulated_tokens: List[str] = []
+                accumulated_thoughts: List[str] = []
+                thought_extractor = StreamThoughtExtractor()
+
                 async for chunk in stream:
                     delta = chunk.choices[0].delta if chunk.choices else None
-                    if delta and delta.content:
-                        token = delta.content
-                        accumulated_tokens.append(token)
-                        yielded_any = True
-                        yield {"type": "token", "content": token}
+                    if delta:
+                        # 1. Check dedicated reasoning content field
+                        reasoning = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+                        if reasoning:
+                            accumulated_thoughts.append(reasoning)
+                            yielded_any = True
+                            yield {"type": "thought", "content": reasoning}
+
+                        # 2. Process content tokens (extracting any inline <think> tags)
+                        if delta.content:
+                            yielded_any = True
+                            for kind, text in thought_extractor.feed(delta.content):
+                                if kind == "thought":
+                                    accumulated_thoughts.append(text)
+                                    yield {"type": "thought", "content": text}
+                                else:
+                                    accumulated_tokens.append(text)
+                                    yield {"type": "token", "content": text}
 
                 full_text = "".join(accumulated_tokens)
+                full_thoughts = "".join(accumulated_thoughts)
                 yield create_stream_final_payload(
                     raw_response=full_text,
+                    raw_thoughts=full_thoughts,
                     model=current_model,
                     start_time=start_time,
                 )

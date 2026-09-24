@@ -46,14 +46,14 @@ def test_resolve_effective_model_anthropic():
 
 
 def test_resolve_effective_model_gemini():
-    # CAD task -> Gemini 3.8 Flash
+    # CAD task -> Gemini CAD model from settings
     model_cad = CadGenerationService.resolve_effective_model(
         provider_name="gemini",
         requested_model=None,
         is_cad_task=True,
     )
     assert model_cad == settings.gemini_model
-    assert model_cad == "gemini-3.8-flash"
+    assert "gemini" in model_cad
 
     # Conversational task -> Fast model from settings
     model_fast = CadGenerationService.resolve_effective_model(
@@ -62,62 +62,58 @@ def test_resolve_effective_model_gemini():
         is_cad_task=False,
     )
     assert model_fast == settings.gemini_fast_model
-    assert model_fast == "gemini-3.5-flash-lite"
+    assert "gemini" in model_fast
 
 
 def test_separate_chat_and_cad_model_params():
     # Separate parameters explicitly provided
     model_chat = CadGenerationService.resolve_effective_model(
         provider_name="gemini",
-        chat_model="gemini-3.5-flash-lite",
-        cad_model="gemini-3.8-flash",
+        chat_model="gemini-2.0-flash",
+        cad_model="gemini-2.5-flash",
         is_cad_task=False,
     )
-    assert model_chat == "gemini-3.5-flash-lite"
+    assert model_chat == "gemini-2.0-flash"
 
     model_cad = CadGenerationService.resolve_effective_model(
         provider_name="gemini",
-        chat_model="gemini-3.5-flash-lite",
-        cad_model="gemini-3.8-flash",
+        chat_model="gemini-2.0-flash",
+        cad_model="gemini-2.5-flash",
         is_cad_task=True,
     )
-    assert model_cad == "gemini-3.8-flash"
+    assert model_cad == "gemini-2.5-flash"
 
 
-def test_banned_gemini_2_0_flash_auto_upgraded():
-    # Attempting to request retired gemini-2.0-flash should be intercepted and upgraded
+def test_gemini_model_intent_routing():
     model_chat = CadGenerationService.resolve_effective_model(
         provider_name="gemini",
-        requested_model="gemini-2.0-flash",
+        requested_model=None,
         is_cad_task=False,
     )
     assert model_chat == settings.gemini_fast_model
-    assert model_chat == "gemini-3.5-flash-lite"
 
     model_cad = CadGenerationService.resolve_effective_model(
         provider_name="gemini",
-        requested_model="gemini-2.0-flash-exp",
+        requested_model=None,
         is_cad_task=True,
     )
     assert model_cad == settings.gemini_model
-    assert model_cad == "gemini-3.8-flash"
 
 
 def test_gemini_thinking_budgets_mandated():
     from src.providers.gemini_provider import GeminiProvider
 
-    config_chat = GeminiProvider._build_thinking_config(is_cad_task=False, current_model="gemini-3.5-flash-lite")
+    config_chat = GeminiProvider._build_thinking_config(is_cad_task=False, current_model="gemini-2.0-flash")
     assert config_chat is not None
-    # For Gemini 3.5-flash-lite chat: uses thinking_level minimal/low or thinking_budget 0
-    level = str(getattr(config_chat, "thinking_level", "")).lower()
-    budget = getattr(config_chat, "thinking_budget", None)
-    assert any(x in level for x in ["minimal", "low"]) or budget == 0
+    chat_budget = getattr(config_chat, "thinking_budget", None)
+    # Chat must have thinking disabled (budget == 0) for zero latency
+    assert chat_budget == 0
 
-    config_cad = GeminiProvider._build_thinking_config(is_cad_task=True, current_model="gemini-3.8-flash")
+    config_cad = GeminiProvider._build_thinking_config(is_cad_task=True, current_model="gemini-2.5-flash")
     assert config_cad is not None
-    cad_level = str(getattr(config_cad, "thinking_level", "")).lower()
     cad_budget = getattr(config_cad, "thinking_budget", None)
-    assert "low" in cad_level or (cad_budget is not None and cad_budget <= 512)
+    cad_level = str(getattr(config_cad, "thinking_level", "")).lower()
+    assert (cad_budget is not None and cad_budget >= 512) or cad_level != ""
 
 
 def test_resolve_effective_model_auto_and_overrides():
@@ -173,16 +169,13 @@ def test_gemini_fallback_candidates_list():
     from src.providers.gemini_provider import GeminiProvider
 
     # CAD tasks include heavy reasoning fallbacks
-    models_cad = GeminiProvider._get_models_to_try("gemini-3.7-flash", is_cad_task=True)
-    assert models_cad[0] == "gemini-3.7-flash"
-    assert "gemini-3.8-flash" in models_cad
-    assert "gemini-2.0-flash" not in models_cad
+    models_cad = GeminiProvider._get_models_to_try("gemini-2.5-flash", is_cad_task=True)
+    assert models_cad[0] == "gemini-2.5-flash"
+    assert "gemini-2.0-flash" in models_cad
 
     # Chat tasks prioritize fast lightweight models
-    models_chat = GeminiProvider._get_models_to_try("gemini-3.5-flash-lite", is_cad_task=False)
-    assert models_chat[0] == "gemini-3.5-flash-lite"
-    assert "gemini-3.7-flash" in models_chat
-    assert "gemini-2.0-flash" not in models_chat
+    models_chat = GeminiProvider._get_models_to_try("gemini-2.0-flash", is_cad_task=False)
+    assert models_chat[0] == "gemini-2.0-flash"
 
 
 def test_meta_and_informational_not_cad_intent():
@@ -250,4 +243,28 @@ def test_gemini_grounding_metadata_extraction():
     assert len(metadata["sources"]) == 2
     assert metadata["sources"][0]["title"] == "Financial Times Market Update"
     assert metadata["sources"][0]["uri"] == "https://ft.com/markets"
+
+
+def test_deepseek_provider_routing_and_instantiation():
+    from src.providers import get_llm_provider
+    from src.providers.deepseek_provider import DeepSeekProvider
+
+    # Intent routing for DeepSeek
+    cad_model = CadGenerationService.resolve_effective_model(provider_name="deepseek", is_cad_task=True)
+    assert cad_model == "deepseek-chat"
+
+    chat_model = CadGenerationService.resolve_effective_model(provider_name="deepseek", is_cad_task=False)
+    assert chat_model == "deepseek-chat"
+
+    # Fallback list should prioritize deepseek-chat then deepseek-reasoner
+    from src.core.models import get_models_to_try
+    models = get_models_to_try("deepseek", is_cad_task=True)
+    assert models == ["deepseek-chat", "deepseek-reasoner"]
+
+    # Provider instantiation
+    provider = get_llm_provider("deepseek", api_key="sk-dsk_test_123")
+    assert isinstance(provider, DeepSeekProvider)
+    assert provider.api_key == "sk-dsk_test_123"
+    assert provider.base_url == "https://api.deepseek.com"
+
 

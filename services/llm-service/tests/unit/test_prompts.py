@@ -62,7 +62,27 @@ def test_is_cad_intent():
     assert ContextBuilder.is_cad_intent("what are the materials used in 3D printing?") is False
     assert ContextBuilder.is_cad_intent("tell me about replicad") is False
 
-    # Explicit 3D CAD modeling requests should trigger CAD generation
+    # 3D Printing advice, slicer settings, troubleshooting, & questions (MUST NOT burn CAD tokens)
+    assert ContextBuilder.is_cad_intent("how do I slice this model for 3d printing?") is False
+    assert ContextBuilder.is_cad_intent("what infill should I use for 3d printing?") is False
+    assert ContextBuilder.is_cad_intent("why is my 3d print warping?") is False
+    assert ContextBuilder.is_cad_intent("can you explain how 3d printing works?") is False
+    assert ContextBuilder.is_cad_intent("what temperature for PLA 3d printing?") is False
+    assert ContextBuilder.is_cad_intent("how to calibrate 3d printer e-steps?") is False
+    assert ContextBuilder.is_cad_intent("is 3d printing safe indoors?") is False
+    assert ContextBuilder.is_cad_intent("when ever user ask then only genrate 3d printing because tocken will burn") is False
+
+    # Explicit 3D CAD modeling and direct 3D printing requests should trigger CAD generation
     assert ContextBuilder.is_cad_intent("create an enclosure box with lid") is True
     assert ContextBuilder.is_cad_intent("make a cylinder with radius 20mm") is True
     assert ContextBuilder.is_cad_intent("design a mounting bracket") is True
+    assert ContextBuilder.is_cad_intent("3d print me a phone stand") is True
+    assert ContextBuilder.is_cad_intent("design a 3d gear with 20 teeth") is True
+    assert ContextBuilder.is_cad_intent("build a staircase model") is True
+
+    # Parametric modifications on existing CAD models should trigger CAD generation
+    assert ContextBuilder.is_cad_intent("Increase the glass lid thickness by 2mm") is True
+    assert ContextBuilder.is_cad_intent("modify height to 50mm") is True
+    assert ContextBuilder.is_cad_intent("make it wider by 10mm") is True
+    assert ContextBuilder.is_cad_intent("add 4 screw holes") is True
+    assert ContextBuilder.is_cad_intent("fillet the top edges") is True

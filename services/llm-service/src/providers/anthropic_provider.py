@@ -8,6 +8,7 @@ from src.config import settings
 from src.domain.models import LlmGenerationResult
 from src.core.base import BaseLlmProvider
 from src.core.common import (
+    StreamThoughtExtractor,
     create_generation_result,
     create_stream_final_payload,
     execute_with_model_fallback,
@@ -71,7 +72,16 @@ class AnthropicProvider(BaseLlmProvider):
             call_fn=_call,
         )
 
-        content = "".join([block.text for block in response.content if hasattr(block, "text")])
+        content_blocks = []
+        thinking_blocks = []
+        for block in response.content:
+            if getattr(block, "type", None) == "thinking" or hasattr(block, "thinking"):
+                thinking_blocks.append(getattr(block, "thinking", ""))
+            elif hasattr(block, "text"):
+                content_blocks.append(block.text)
+
+        content = "".join(content_blocks)
+        reasoning = "".join(thinking_blocks)
         tokens = response.usage.input_tokens + response.usage.output_tokens if response.usage else 0
         return create_generation_result(
             raw_response=content,
@@ -79,6 +89,7 @@ class AnthropicProvider(BaseLlmProvider):
             model=used_model,
             start_time=start_time,
             token_usage=tokens,
+            raw_thoughts=reasoning,
         )
 
     async def generate_stream(
@@ -102,25 +113,54 @@ class AnthropicProvider(BaseLlmProvider):
                     logger.info("Anthropic stream: falling back from '%s' to '%s'", models_to_try[0], current_model)
 
                 assert self._client is not None
+                is_thinking_model = "3-7" in current_model.lower() or "thinking" in current_model.lower()
                 create_kwargs: Dict[str, Any] = {
                     "model": current_model,
                     "messages": claude_messages,
-                    "max_tokens": 4096 if is_cad_task else 2048,
-                    "extra_body": {"temperature": temperature},
+                    "max_tokens": 8192 if is_cad_task else 4096,
                 }
+                if is_thinking_model and is_cad_task:
+                    create_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 1024}
+                else:
+                    create_kwargs["extra_body"] = {"temperature": temperature}
+
                 if clean_system:
                     create_kwargs["system"] = clean_system
 
                 accumulated_tokens: List[str] = []
+                accumulated_thoughts: List[str] = []
+                thought_extractor = StreamThoughtExtractor()
+
                 async with self._client.messages.stream(**create_kwargs) as stream:
-                    async for text in stream.text_stream:
-                        accumulated_tokens.append(text)
-                        yielded_any = True
-                        yield {"type": "token", "content": text}
+                    async for event in stream:
+                        event_type = getattr(event, "type", None)
+                        if event_type == "content_block_delta":
+                            delta = getattr(event, "delta", None)
+                            if delta:
+                                delta_type = getattr(delta, "type", None)
+                                if delta_type == "thinking_delta":
+                                    th = getattr(delta, "thinking", "")
+                                    if th:
+                                        accumulated_thoughts.append(th)
+                                        yielded_any = True
+                                        yield {"type": "thought", "content": th}
+                                elif delta_type == "text_delta":
+                                    t = getattr(delta, "text", "")
+                                    if t:
+                                        yielded_any = True
+                                        for kind, text in thought_extractor.feed(t):
+                                            if kind == "thought":
+                                                accumulated_thoughts.append(text)
+                                                yield {"type": "thought", "content": text}
+                                            else:
+                                                accumulated_tokens.append(text)
+                                                yield {"type": "token", "content": text}
 
                 full_text = "".join(accumulated_tokens)
+                full_thoughts = "".join(accumulated_thoughts)
                 yield create_stream_final_payload(
                     raw_response=full_text,
+                    raw_thoughts=full_thoughts,
                     model=current_model,
                     start_time=start_time,
                 )

@@ -19,6 +19,7 @@ const PROVIDER_NAMES: Record<ProviderType, string> = {
   anthropic: "Claude",
   gemini: "Google Gemini",
   groq: "Groq",
+  deepseek: "DeepSeek",
   ollama: "Ollama",
 };
 

@@ -4,6 +4,7 @@ from typing import Optional
 from src.config import settings
 from src.providers.anthropic_provider import AnthropicProvider
 from src.core.base import BaseLlmProvider
+from src.providers.deepseek_provider import DeepSeekProvider
 from src.providers.gemini_provider import GeminiProvider
 from src.providers.groq_provider import GroqProvider
 from src.providers.ollama_provider import OllamaProvider
@@ -26,6 +27,8 @@ def get_llm_provider(
         return GeminiProvider(api_key=api_key)
     elif name == "groq":
         return GroqProvider(api_key=api_key, base_url=base_url)
+    elif name == "deepseek":
+        return DeepSeekProvider(api_key=api_key, base_url=base_url)
     elif name == "ollama":
         return OllamaProvider(base_url=base_url)
     else:

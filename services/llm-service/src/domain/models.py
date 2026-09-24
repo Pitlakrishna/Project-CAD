@@ -24,4 +24,5 @@ class LlmGenerationResult:
     model: str
     latency_ms: float
     grounding_metadata: Optional[Dict[str, Any]] = None
+    raw_thoughts: str = ""
 

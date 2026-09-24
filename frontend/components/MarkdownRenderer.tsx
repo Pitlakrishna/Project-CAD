@@ -29,14 +29,15 @@ function CodeSnippet({ inline, className, children, ...props }: CodeBlockProps) 
     );
   }
 
-  // Only hide actual Replicad 3D CAD model scripts (which are rendered in the 3D viewer)
+  // Hide raw Replicad 3D CAD model scripts completely from chat message text
   const isReplicadScript =
     language === "replicad" ||
-    (codeString.includes("from 'replicad'") || codeString.includes("from \"replicad\"")) ||
-    (codeString.includes("export default function main") && codeString.includes("defaultParams"));
+    codeString.includes("replicad") ||
+    codeString.includes("defaultParams") ||
+    (codeString.includes("sketchOnPlane") && codeString.includes("extrude")) ||
+    (codeString.includes("drawCircle") && codeString.includes("extrude"));
 
   if (isReplicadScript) {
-    // Hide raw CAD code completely from chat message text
     return null;
   }
 

@@ -2,7 +2,8 @@
 
 import logging
 import uuid
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
+import httpx
 from src.api.schemas import (
     CadGenerationResponse,
     GenerateCadRequest,
@@ -66,7 +67,7 @@ class CadGenerationService:
                 target_model = chat_req
             elif req and req.lower() not in ("auto", "default"):
                 # If requested_model is specifically the heavy CAD default model, don't force it on chat
-                heavy_cad_defaults = [settings.gemini_model.lower(), "gemini-3.8-flash", settings.openai_model.lower(), settings.anthropic_model.lower()]
+                heavy_cad_defaults = [settings.gemini_model.lower(), settings.openai_model.lower(), settings.anthropic_model.lower()]
                 if req.lower() in heavy_cad_defaults:
                     target_model = None
                 else:
@@ -79,6 +80,81 @@ class CadGenerationService:
         if config:
             return config.cad_model if is_cad_task else config.chat_model
         return "default"
+
+    async def _validate_and_auto_repair(
+        self,
+        provider,
+        messages: List[Dict[str, str]],
+        model_name: str,
+        initial_result,
+        parsed,
+        max_repairs: int = 2,
+    ):
+        """Validates generated Replicad code against cad-service and triggers automatic LLM self-repair reflection if runtime errors occur."""
+        current_code = parsed.code
+        current_params = parsed.parameters
+        current_raw = initial_result.raw_response
+        total_tokens = initial_result.token_usage
+
+        for attempt in range(max_repairs):
+            if not current_code or not getattr(settings, "auto_repair_cad_errors", True):
+                break
+
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{settings.cad_service_url}/api/v1/cad/generate",
+                        json={"script": current_code, "parameters": current_params},
+                    )
+
+                    if resp.status_code == 200:
+                        logger.info("CAD code successfully validated against OpenCASCADE cad-service.")
+                        break
+
+                    error_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                    error_msg = error_data.get("error", resp.text)
+                    logger.warning(
+                        "CAD code failed execution (attempt %d/%d): %s. Triggering automatic LLM self-repair...",
+                        attempt + 1,
+                        max_repairs,
+                        error_msg,
+                    )
+
+                    # Reflection prompt to LLM to self-heal its code
+                    repair_messages = list(messages) + [
+                        {"role": "assistant", "content": current_raw},
+                        {
+                            "role": "user",
+                            "content": (
+                                f"The generated Replicad TypeScript code produced the following execution error in the CAD kernel:\n"
+                                f"```\n{error_msg}\n```\n\n"
+                                f"Please fix this error. Ensure all variables, dimensions, and parameters (e.g. chamfers, fillets, radii) are explicitly defined and declared. "
+                                f"Return the complete, corrected Replicad TypeScript code block enclosed in ```typescript ... ```."
+                            ),
+                        },
+                    ]
+
+                    repair_result = await provider.generate(
+                        messages=repair_messages,
+                        model=model_name,
+                        temperature=0.1,
+                        is_cad_task=True,
+                    )
+
+                    total_tokens += repair_result.token_usage
+                    repaired_parsed = ReplicadParser.parse_cad_output(repair_result.raw_response)
+
+                    if repaired_parsed.code:
+                        current_code = repaired_parsed.code
+                        current_params = repaired_parsed.parameters
+                        current_raw = repair_result.raw_response
+                        parsed = repaired_parsed
+
+            except Exception as e:
+                logger.debug("CAD service validation skipped or unavailable: %s", e)
+                break
+
+        return parsed, total_tokens
 
     async def generate_cad(self, request: GenerateCadRequest) -> CadGenerationResponse:
         prompt_id = str(uuid.uuid4())
@@ -139,11 +215,23 @@ class CadGenerationService:
         # Parse and sanitize Replicad TypeScript code
         parsed = ReplicadParser.parse_cad_output(result.raw_response)
 
+        # Autonomous Commercial Self-Correction & Auto-Repair
+        if is_cad_task and parsed.code:
+            parsed, total_tokens = await self._validate_and_auto_repair(
+                provider=provider,
+                messages=messages,
+                model_name=model_name,
+                initial_result=result,
+                parsed=parsed,
+            )
+            result.token_usage = total_tokens
+
         # Assemble API response
         response = CadGenerationResponse(
             prompt_id=prompt_id,
             replicad_code=parsed.code,
             raw_explanation=parsed.explanation,
+            raw_thoughts=getattr(result, "raw_thoughts", None) or None,
             parameters=parsed.parameters,
             parameter_definitions=parsed.parameter_definitions,
             parts=parsed.parts,
@@ -262,6 +350,7 @@ class CadGenerationService:
                 prompt_id=prompt_id,
                 replicad_code=parsed.code,
                 raw_explanation=clean_explanation,
+                raw_thoughts=full_thoughts or None,
                 parameters=parsed.parameters,
                 parameter_definitions=parsed.parameter_definitions,
                 parts=parsed.parts,
@@ -315,6 +404,17 @@ class CadGenerationService:
         )
 
         parsed = ReplicadParser.parse_cad_output(result.raw_response)
+
+        # Autonomous Commercial Self-Correction & Auto-Repair for Refinement
+        if is_cad_task and parsed.code:
+            parsed, total_tokens = await self._validate_and_auto_repair(
+                provider=provider,
+                messages=messages,
+                model_name=model_name,
+                initial_result=result,
+                parsed=parsed,
+            )
+            result.token_usage = total_tokens
 
         response = CadGenerationResponse(
             prompt_id=prompt_id,
@@ -394,6 +494,7 @@ class CadGenerationService:
                 prompt_id=prompt_id,
                 replicad_code=parsed.code,
                 raw_explanation=clean_explanation,
+                raw_thoughts=full_thoughts or None,
                 parameters=parsed.parameters,
                 parameter_definitions=parsed.parameter_definitions,
                 parts=parsed.parts,

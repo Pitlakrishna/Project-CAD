@@ -27,29 +27,27 @@ class ProviderModelConfig:
     banned_models: frozenset[str] = field(default_factory=frozenset)
 
 
-# Deprecated/retired Gemini preview models that should never be dispatched
-GEMINI_BANNED_MODELS = frozenset({
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-exp",
-    "gemini-2.0-flash-001",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-exp",
-    "gemini-2.5-flash-001",
-})
+# Banned models registry (kept empty so real models like gemini-2.0-flash / gemini-2.5-flash are not blocked)
+GEMINI_BANNED_MODELS = frozenset()
 
 
 def _build_registry() -> Dict[str, ProviderModelConfig]:
     """Dynamically builds the provider model registry pulling configured defaults from settings."""
     return {
         "gemini": ProviderModelConfig(
-            cad_model=getattr(settings, "gemini_model", "gemini-3.8-flash"),
+            cad_model=getattr(settings, "gemini_model", "gemini-2.5-flash"),
             cad_fallbacks=(
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-thinking-exp-01-21",
                 "gemini-3.8-flash",
                 "gemini-3.7-flash",
                 "gemini-3.5-flash-lite",
             ),
-            chat_model=getattr(settings, "gemini_fast_model", "gemini-3.5-flash-lite"),
+            chat_model=getattr(settings, "gemini_fast_model", "gemini-2.0-flash"),
             chat_fallbacks=(
+                "gemini-2.0-flash",
+                "gemini-2.5-flash",
                 "gemini-3.5-flash-lite",
                 "gemini-3.7-flash",
             ),
@@ -59,12 +57,14 @@ def _build_registry() -> Dict[str, ProviderModelConfig]:
             cad_model=getattr(settings, "groq_model", "llama-3.3-70b-versatile"),
             cad_fallbacks=(
                 "llama-3.3-70b-versatile",
+                "deepseek-r1-distill-llama-70b",
                 "qwen-qwq-32b",
                 "llama-3.1-8b-instant",
             ),
             chat_model=getattr(settings, "groq_fast_model", "openai/gpt-oss-20b"),
             chat_fallbacks=(
                 "llama-3.1-8b-instant",
+                "deepseek-r1-distill-llama-70b",
                 "openai/gpt-oss-20b",
             ),
         ),
@@ -72,12 +72,14 @@ def _build_registry() -> Dict[str, ProviderModelConfig]:
             cad_model=getattr(settings, "openai_model", "gpt-4o"),
             cad_fallbacks=(
                 "gpt-4o",
+                "o3-mini",
                 "gpt-4-turbo",
                 "gpt-4o-mini",
             ),
             chat_model=getattr(settings, "openai_fast_model", "gpt-4o-mini"),
             chat_fallbacks=(
                 "gpt-4o-mini",
+                "o3-mini",
                 "gpt-4o",
             ),
         ),
@@ -85,25 +87,42 @@ def _build_registry() -> Dict[str, ProviderModelConfig]:
             cad_model=getattr(settings, "anthropic_model", "claude-3-5-sonnet-20241022"),
             cad_fallbacks=(
                 "claude-3-5-sonnet-20241022",
+                "claude-3-7-sonnet-20250219",
                 "claude-3-opus-20240229",
                 "claude-3-5-haiku-20241022",
             ),
             chat_model=getattr(settings, "anthropic_fast_model", "claude-3-5-haiku-20241022"),
             chat_fallbacks=(
                 "claude-3-5-haiku-20241022",
+                "claude-3-7-sonnet-20250219",
                 "claude-3-5-sonnet-20241022",
+            ),
+        ),
+        "deepseek": ProviderModelConfig(
+            cad_model=getattr(settings, "deepseek_model", "deepseek-chat"),
+            cad_fallbacks=(
+                "deepseek-chat",
+                "deepseek-reasoner",
+            ),
+            chat_model=getattr(settings, "deepseek_fast_model", "deepseek-chat"),
+            chat_fallbacks=(
+                "deepseek-chat",
+                "deepseek-reasoner",
             ),
         ),
         "ollama": ProviderModelConfig(
             cad_model=getattr(settings, "ollama_model", "deepseek-coder:6.7b"),
             cad_fallbacks=(
                 "deepseek-coder:6.7b",
+                "deepseek-r1:latest",
+                "deepseek-r1:8b",
                 "deepseek-r1:7b",
                 "llama3:latest",
             ),
             chat_model="llama3:latest",
             chat_fallbacks=(
                 "llama3:latest",
+                "deepseek-r1:latest",
                 "deepseek-coder:6.7b",
             ),
         ),
@@ -183,6 +202,12 @@ def is_retryable_model_error(error: Exception) -> bool:
         "rpm",
         "overloaded",
         "503",
+        "504",
+        "deadline_exceeded",
+        "deadline expired",
+        "deadline",
+        "timeout",
+        "timed out",
         "model not found",
         "not available",
     ]

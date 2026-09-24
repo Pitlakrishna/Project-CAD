@@ -10,7 +10,9 @@ class ContextBuilder:
 
     @classmethod
     def is_cad_intent(cls, prompt: str, constraints: Optional[Dict[str, Any]] = None) -> bool:
-        """Determines if the prompt is asking to design, create, or modify 3D CAD geometry."""
+        """Determines if the prompt explicitly directs the system to generate, create, or modify a 3D CAD/print model.
+        Prevents burning expensive CAD tokens on informational questions, 3D printing advice, explanations, or chat.
+        """
         if constraints and any(v for v in constraints.values() if v is not None and v != ""):
             return True
 
@@ -18,7 +20,7 @@ class ContextBuilder:
         if not text:
             return False
 
-        # Casual conversational greetings and chit-chat
+        # 1. Casual conversational greetings and chit-chat
         greetings = {
             "hi", "hello", "hey", "hola", "howdy", "sup", "yo", "greetings",
             "hi there", "hello there", "hey there", "whats up", "what's up",
@@ -31,73 +33,84 @@ class ContextBuilder:
         if clean_punct in greetings or len(clean_punct) <= 2:
             return False
 
-        # Meta, assistance, review, model inquiry, and latency questions (NOT CAD generation)
-        meta_conversational_patterns = [
-            r"\b(who\s+are\s+you|what\s+are\s+you|what\s+can\s+you\s+do)\b",
-            r"\b(what\s+model|which\s+model|your\s+model|current\s+model|fast\s+model|cad\s+model)\b",
-            r"\b(code\s+review|review\s+the\s+code|review\s+code|fix\s+the\s+review|review\s+and\s+fix|fix\s+the\s+code\s+review)\b",
-            r"\b(latency|seconds?|ms|delay|fast|slow|speed|why\s+taking|why\s+did\s+it\s+take)\b",
-            r"\b(can\s+you\s+help|help\s+me|how\s+to\s+use|how\s+does\s+this\s+work)\b",
-        ]
-        has_meta_chat = any(bool(re.search(pat, text)) for pat in meta_conversational_patterns)
-        has_explicit_3d_geometry_creation = bool(
+        # 2. Informational questions, advice, troubleshooting, and explanation queries (STRICTLY NON-CAD)
+        # Prevents token burn on: "how to slice for 3d printing", "what infill should i use", "why did my print warp", "explain staircase"
+        is_informational_or_advice = bool(
             re.search(
-                r"\b(design|create|build|generate|extrude|revolve|sketch|make)\s+(a|an|the|\d+|new)?\s*(3d|cad|solid|mesh|part|bracket|box|cylinder|sphere|gear|enclosure)\b",
+                r"^(?:what|which|who|where|when|why|how|can\s+you\s+explain|tell\s+me\s+about|explain|describe|give\s+me\s+advice|suggest|recommend|review|summarize)\b|"
+                r"\b(?:how\s+to\s+slice|slicing\s+settings|infill\s+percentage|print\s+settings|bed\s+temperature|nozzle\s+temp|warping|layer\s+height|layer\s+adhesion|stringing|first\s+layer|adhesion|extrusion|difference\s+between|compare)\b",
                 text,
             )
         )
-        if has_meta_chat and not has_explicit_3d_geometry_creation:
+        # Check if the informational query has an explicit direct modeling command like "design a", "generate a 3d", "create a 3d"
+        has_direct_modeling_command = bool(
+            re.search(
+                r"\b(?:design|create|build|generate|make|model)\s+(?:me\s+)?(?:a|an|the|\d+|new)?\s*(?:3d|cad|solid|mesh|stl|step|printable)\b|"
+                r"\b(?:design|create|build|generate|make|model)\s+(?:me\s+)?(?:a|an|the|\d+|new)?\s*(?:bracket|gear|nut|bolt|screw|washer|enclosure|box|case|housing|flange|nozzle|holder|mount|stand|standoff|chassis|staircase|foundation|cylinder|sphere|cone|clamp|clip|pipe|duct|bushing|propeller|hook|hanger|handle|knob|adapter|tray|cap|cover|lid|vase|planter|plate|wheel|pulley|funnel|rack)\b",
+                text,
+            )
+        )
+        if is_informational_or_advice and not has_direct_modeling_command:
             return False
 
-        # Documentation, guides, and specification requests (unless explicit 3D geometry generation is requested)
+        # 3. Documentation, specs, manuals, and code review (STRICTLY NON-CAD)
         is_documentation_request = bool(
             re.search(
-                r"\b(documentation|document|docs|writeup|manual|guide|specifications?|spec sheet|overview|readme|summary)\b",
+                r"\b(documentation|document|docs|writeup|manual|guide|specifications?|spec sheet|overview|readme|summary|review\s+code|code\s+review)\b",
                 text,
             )
         )
-        has_3d_geometry_intent = bool(
-            re.search(
-                r"\b(3d\s+model|stl|step|replicad|extrude|revolve|solid|fillet|chamfer|cad\s+model)\b",
-                text,
-            )
-        )
-        if is_documentation_request and not has_3d_geometry_intent:
+        if is_documentation_request and not has_direct_modeling_command:
             return False
 
-        # Pure informational questions (unless an explicit design action verb is present)
-        is_informational_question = bool(
-            re.match(
-                r"^(what|which|who|where|when|why|how|can\s+you\s+explain|tell\s+me\s+about|explain)\b",
-                text,
-            )
-        )
-
-        has_explicit_design_verb = bool(
+        # 4. Explicit 3D Printing / 3D Modeling Directive
+        # e.g. "3d print a phone stand", "print a gear in 3d", "print me an enclosure"
+        is_direct_3d_print_command = bool(
             re.search(
-                r"\b(design|create|build|generate|sketch|extrude|revolve|modify|adjust|update|scale|resize|add\s+\d+|cut|cutout)\b",
+                r"\b(?:3d\s*print|print\s+(?:in\s+)?3d|print\s+(?:me\s+)?(?:a|an)?)\s+[\w\s]{2,40}\b",
+                text,
+            ) and not re.search(r"\b(?:how|why|settings?|temperature|bed|slicer|layer|infill|fail|warping|problem|issue)\b", text)
+        )
+        if is_direct_3d_print_command:
+            return True
+
+        # 5. Explicit CAD Creation Verbs coupled with 3D / Mechanical Geometry Objects
+        # Must have BOTH a creation/design verb AND a concrete 3D object/part or 3D keyword!
+        has_creation_verb = bool(
+            re.search(
+                r"\b(design|create|build|generate|model|make|construct|extrude|revolve|fabricate)\b",
+                text,
+            )
+        )
+        has_3d_target = bool(
+            re.search(
+                r"\b(3d|cad|solid|mesh|replicad|stl|step|model|assembly|printable)\b|"
+                r"\b(bracket|gear|nut|bolt|screw|washer|enclosure|box|case|housing|flange|mount|stand|standoff|chassis|hinge|staircase|foundation|cylinder|sphere|cone|nozzle|holder|clamp|clip|pipe|duct|bushing|propeller|hook|hanger|handle|knob|adapter|tray|cap|cover|lid|vase|planter|plate|wheel|pulley|funnel|rack)\b",
                 text,
             )
         )
 
-        if is_informational_question and not has_explicit_design_verb:
-            return False
+        if has_creation_verb and has_3d_target:
+            return True
 
-        # CAD keywords indicating geometric, component, or dimensional modeling requests
-        cad_keywords_pattern = (
-            r"\b(design|create|model|build|make|generate|sketch|extrude|revolve|"
-            r"fillet|chamfer|render|construct|assemble|modify|update|resize|scale|"
-            r"increase|decrease|adjust|tweak|thicken|widen|shorten|lengthen|"
-            r"box|cube|cylinder|sphere|cone|torus|gear|bracket|mount|case|enclosure|"
-            r"chassis|housing|flange|screw|bolt|nut|washer|thread|hole|pocket|"
-            r"bearing|spacer|standoff|plate|panel|hinge|latch|handle|knob|wheel|"
-            r"pulley|coupler|fitting|nozzle|adapter|cap|lid|plug|container|tray|"
-            r"stand|holder|clamp|clip|arm|lever|propeller|duct|pipe|tube|bushing|"
-            r"shaft|pin|gasket|lens|window|mesh|cad|3d|replicad|solid|geometry|"
-            r"diameter|radius|thickness|tolerance|clearance|parametric|mm|cm)\b"
+        # 6. Explicit Parametric Modification Directives (Editing an existing CAD model)
+        # e.g. "modify height to 50mm", "make it wider by 10mm", "add 4 screw holes", "fillet the edges", "increase the glass lid thickness"
+        is_cad_modification = bool(
+            re.search(
+                r"\b(modify|resize|scale|enlarge|shrink)\b|"
+                r"\bmake\s+(?:it|the\s+[\w\s]{1,25})\s+(wider|thicker|taller|bigger|smaller|longer|narrower|shorter)\b|"
+                r"\b(increase|decrease|reduce)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(radius|diameter|height|width|length|thickness|size|depth)\b|"
+                r"\badd\s+(?:\d+\s+)?(?:[\w\s]{1,20}\s+)?(mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?)\b|"
+                r"\b(fillet|chamfer|round|bevel)\s+(?:the\s+)?(?:[\w\s]{1,20}\s+)?(edges?|corners?)\b|"
+                r"\bchange\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(radius|diameter|height|width|length|thickness|color|material|dimension)\b",
+                text,
+            )
         )
+        if is_cad_modification:
+            return True
 
-        return bool(re.search(cad_keywords_pattern, text))
+        # Default to False: Do NOT burn CAD tokens unless the user specifically asked for a 3D model!
+        return False
 
     @classmethod
     def build_generation_messages(

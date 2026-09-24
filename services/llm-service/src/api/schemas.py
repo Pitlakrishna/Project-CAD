@@ -38,7 +38,7 @@ class ParameterDefinition(BaseModel):
 
 class GenerateCadRequest(BaseModel):
     prompt: str = Field(..., min_length=1, description="Natural language prompt describing the 3D parametric object or conversation")
-    provider: Optional[str] = Field(default=None, description="Optional override: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama'")
+    provider: Optional[str] = Field(default=None, description="Optional override: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama' | 'deepseek'")
     model: Optional[str] = Field(default=None, description="Optional override for model name")
     chat_model: Optional[str] = Field(default=None, description="Optional model override for conversational / fast chat")
     cad_model: Optional[str] = Field(default=None, description="Optional model override for 3D CAD parametric modeling")
@@ -71,7 +71,7 @@ class ValidateCadRequest(BaseModel):
 
 
 class VerifyCredentialsRequest(BaseModel):
-    provider: str = Field(..., description="Provider: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama'")
+    provider: str = Field(..., description="Provider: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama' | 'deepseek'")
     api_key: Optional[str] = Field(default=None, description="Provider API key to test")
     model: Optional[str] = Field(default=None, description="Model identifier to test against")
     base_url: Optional[str] = Field(default=None, description="Base URL / host for provider")
@@ -94,7 +94,7 @@ class CadGenerationResponse(BaseModel):
     parts: List[PartVisualSchema] = Field(default_factory=list, description="List of assembly parts with colors and materials")
     materials_used: List[str] = Field(default_factory=list, description="Summary list of unique materials present")
     has_glass: bool = Field(default=False, description="Indicates if this model contains optical/glass components")
-    provider: str = Field(..., description="Provider used ('gemini', 'groq', 'openai', 'anthropic', 'ollama')")
+    provider: str = Field(..., description="Provider used ('gemini', 'groq', 'openai', 'anthropic', 'ollama', 'deepseek')")
     model: str = Field(..., description="Model identifier used")
     token_usage: int = Field(default=0, description="Total tokens used in generation")
     cached: bool = Field(default=False, description="Whether the result was served from Redis cache")

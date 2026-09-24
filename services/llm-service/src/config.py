@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     port: int = 8000
     host: str = "0.0.0.0"
 
-    # LLM Provider: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama'
+    # LLM Provider: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama' | 'deepseek'
     llm_provider: str = "gemini"
 
     # OpenAI Settings
@@ -33,11 +33,11 @@ class Settings(BaseSettings):
 
     # Google Gemini Settings
     gemini_api_key: Optional[str] = None
-    gemini_model: str = "gemini-3.8-flash"
-    gemini_fast_model: str = "gemini-3.5-flash-lite"
-    gemini_timeout_seconds: float = 60.0
-    gemini_thinking_budget_chat: int = 0
-    gemini_thinking_budget_cad: int = 512
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_fast_model: str = "gemini-2.0-flash"
+    gemini_timeout_seconds: float = 180.0
+    gemini_thinking_budget_chat: int = 512
+    gemini_thinking_budget_cad: int = 1024
     gemini_search_grounding: bool = False
 
     # Groq Settings (Ultra-fast LPU inference, generous free tier)
@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "deepseek-coder:6.7b"
     ollama_timeout_seconds: float = 90.0
+
+    # DeepSeek Settings
+    deepseek_api_key: Optional[str] = None
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+    deepseek_fast_model: str = "deepseek-chat"
+    deepseek_timeout_seconds: float = 60.0
 
     # Redis Cache Settings
     redis_host: str = "localhost"
@@ -66,6 +73,10 @@ class Settings(BaseSettings):
     rabbitmq_pass: str = "guest"
     rabbitmq_events_exchange: str = "aicad.events"
     rabbitmq_enabled: bool = False
+
+    # CAD Service Integration for Compilation & Auto-Repair
+    cad_service_url: str = "http://localhost:8002"
+    auto_repair_cad_errors: bool = True
 
     # CORS
     cors_origins: List[str] = ["*"]

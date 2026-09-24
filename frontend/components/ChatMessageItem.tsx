@@ -3,6 +3,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { ChatMessage } from "../lib/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { CadModelCard } from "./CadModelCard";
+import { ThoughtAccordion } from "./ThoughtAccordion";
+import { DynamicArtifactCard } from "./DynamicArtifactCard";
 import {
   IconCube,
   IconCopy,
@@ -16,6 +19,7 @@ import {
 
 interface ChatMessageItemProps {
   message: ChatMessage;
+  userPrompt?: string;
   onResubmitPrompt?: (messageId: string, newText: string) => void;
   onRefinePrompt?: (suggestion: string) => void;
   onOpenSettings?: () => void;
@@ -24,6 +28,7 @@ interface ChatMessageItemProps {
 
 export function ChatMessageItem({
   message,
+  userPrompt,
   onResubmitPrompt,
   onRefinePrompt,
   onOpenSettings,
@@ -246,6 +251,13 @@ export function ChatMessageItem({
               })()
             ) : (
               <>
+                {/* Live Thinking / Thought Process Accordion */}
+                {(Boolean(message.thoughts) || message.isThinking) && (
+                  <ThoughtAccordion
+                    thoughts={message.thoughts || ""}
+                    isThinking={Boolean(message.isThinking)}
+                  />
+                )}
 
                 {/* Markdown Response with live word-by-word streaming cursor */}
                 <div className="w-full">
@@ -256,13 +268,31 @@ export function ChatMessageItem({
                         <span className="inline-block w-1.5 h-4 ml-1 bg-white/80 animate-pulse align-middle" />
                       )}
                     </div>
-                  ) : message.isStreaming ? (
+                  ) : message.isStreaming && !message.isThinking ? (
                     <div className="flex items-center gap-2 text-xs text-[#8e8e8e] py-1">
                       <span className="inline-block w-1.5 h-4 bg-white/80 animate-pulse" />
                       <span>Generating response...</span>
                     </div>
                   ) : null}
                 </div>
+
+                {/* 3D CAD Model Export Card (Dimensions, Volume, Prompt-Driven Dynamic Exports) */}
+                {message.geometry && !message.isStreaming && (
+                  <CadModelCard
+                    geometry={message.geometry}
+                    cadResponse={message.cadResponse}
+                    userPrompt={userPrompt || message.userPrompt}
+                  />
+                )}
+
+                {/* Dynamic File Artifacts (Word .docx, Excel .xlsx, PowerPoint .pptx, PDF, CSV) */}
+                {message.artifacts && message.artifacts.length > 0 && !message.isStreaming && (
+                  <div className="w-full space-y-2">
+                    {message.artifacts.map((art) => (
+                      <DynamicArtifactCard key={art.id || art.filename} artifact={art} />
+                    ))}
+                  </div>
+                )}
 
 
                 {/* Assistant Action Bar: Copy */}

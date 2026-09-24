@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
-import pika
+import pika  # type: ignore
 from src.config import settings
 
 logger = logging.getLogger(__name__)

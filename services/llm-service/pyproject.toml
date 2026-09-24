@@ -39,4 +39,9 @@ search-path = ["."]
 
 [tool.pyright]
 extraPaths = ["."]
+reportMissingTypeStubs = false
+
+[[tool.mypy.overrides]]
+module = ["pika", "pika.*"]
+ignore_missing_imports = true
 

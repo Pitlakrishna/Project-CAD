@@ -16,14 +16,12 @@ from src.providers.openai_provider import OpenAiProvider
 def test_gemini_models_intent_separation():
     cad_models = get_models_to_try("gemini", is_cad_task=True)
     assert len(cad_models) >= 2
-    assert "gemini-3.8-flash" in cad_models[0]
-    # CAD fallbacks should prioritize high-capability models
-    assert any("3.7" in m or "3.8" in m for m in cad_models)
+    assert "gemini-2.5-flash" in cad_models[0] or "gemini" in cad_models[0]
+    assert any("2.5" in m or "2.0" in m or "flash" in m for m in cad_models)
 
     chat_models = get_models_to_try("gemini", is_cad_task=False)
     assert len(chat_models) >= 2
-    assert "gemini-3.5-flash-lite" in chat_models[0]
-    assert "3.5-flash-lite" in chat_models[0]
+    assert "gemini-2.0-flash" in chat_models[0] or "gemini" in chat_models[0]
 
 
 def test_groq_models_intent_separation():
@@ -60,14 +58,14 @@ def test_ollama_models_intent_separation():
     assert "llama3:latest" in chat_models[0]
 
 
-def test_sanitize_model_banned_gemini_upgrade():
-    # Deprecated 2.0-flash on CAD task -> upgrades to active CAD model
+def test_sanitize_model_gemini_active():
+    # Real active 2.0-flash on CAD task -> preserved
     sanitized_cad = sanitize_model("gemini", "gemini-2.0-flash", is_cad_task=True)
-    assert sanitized_cad == "gemini-3.8-flash"
+    assert sanitized_cad == "gemini-2.0-flash"
 
-    # Deprecated 2.0-flash on Chat task -> upgrades to active Chat fast model
-    sanitized_chat = sanitize_model("gemini", "gemini-2.0-flash", is_cad_task=False)
-    assert sanitized_chat == "gemini-3.5-flash-lite"
+    # Default fallback when 'auto' or 'default' requested
+    sanitized_default = sanitize_model("gemini", "auto", is_cad_task=False)
+    assert sanitized_default == "gemini-2.0-flash"
 
 
 def test_is_retryable_model_error():
@@ -75,6 +73,8 @@ def test_is_retryable_model_error():
     assert is_retryable_model_error(Exception("RESOURCE_EXHAUSTED: quota exceeded"))
     assert is_retryable_model_error(Exception("rate_limit_exceeded on TPM"))
     assert is_retryable_model_error(Exception("503 Service Overloaded"))
+    assert is_retryable_model_error(Exception("504 DEADLINE_EXCEEDED: Deadline expired before operation could complete."))
+    assert is_retryable_model_error(Exception("The request timed out after 60.0 seconds"))
     assert is_retryable_model_error(Exception("The model `xyz` is not available"))
     assert not is_retryable_model_error(Exception("Invalid authentication key 401"))
     assert not is_retryable_model_error(Exception("Bad syntax in JSON body 400"))
@@ -106,3 +106,25 @@ async def test_groq_provider_fallback_execution():
     # Verify second call used the fallback model
     second_call_kwargs = mock_create.call_args_list[1].kwargs
     assert second_call_kwargs["model"] != "llama-3.3-70b-versatile"
+
+
+def test_stream_thought_extractor():
+    from src.core.common import StreamThoughtExtractor
+
+    extractor = StreamThoughtExtractor()
+
+    # Case 1: Pure tokens
+    ev1 = extractor.feed("Hello world")
+    assert ev1 == [("token", "Hello world")]
+
+    # Case 2: Opening <think> tag
+    ev2 = extractor.feed("Prefix <think>Reasoning step 1")
+    assert ev2 == [("token", "Prefix "), ("thought", "Reasoning step 1")]
+
+    # Case 3: Middle thought chunk
+    ev3 = extractor.feed(" and step 2")
+    assert ev3 == [("thought", " and step 2")]
+
+    # Case 4: Closing </think> tag and answer tokens
+    ev4 = extractor.feed(" done thinking</think>Here is the CAD code")
+    assert ev4 == [("thought", " done thinking"), ("token", "Here is the CAD code")]

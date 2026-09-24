@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { AppSettings, ChatMessage, ChatSession, ProviderType, CadGenerationResponse } from "../lib/types";
+import { AppSettings, ChatMessage, ChatSession, ProviderType, CadGenerationResponse, FileArtifact } from "../lib/types";
+import { parseMarkdownTable, parseMarkdownToSlides } from "../lib/universalDocumentGenerator";
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -11,7 +12,7 @@ import {
   getActiveSessionId,
   setActiveSessionId,
 } from "../lib/storage";
-import { generateCad, refineCad, generateCadStream, refineCadStream, formatErrorMessage } from "../lib/api";
+import { generateCad, refineCad, generateCadStream, refineCadStream, generateModelGeometry, formatErrorMessage } from "../lib/api";
 import { Sidebar } from "../components/Sidebar";
 import { SettingsModal } from "../components/SettingsModal";
 import { AdsPanel } from "../components/AdsPanel";
@@ -149,41 +150,211 @@ export default function Home() {
   function isCadModificationIntent(prompt: string): boolean {
     const text = prompt.toLowerCase().trim();
 
-    // Explicit non-modification conversational patterns
-    const chatPatterns = [
-      /^(hi|hello|hey|greetings|hola|good morning|good afternoon|good evening)\b/i,
-      /^(thanks|thank you|thx|ok|okay|cool|great|awesome|good job|nice)\b/i,
-      /^(what is|who are you|how do i|how does|why did|can you explain|explain to me|tell me about|what are the)\b/i,
+    // 1. Explicit non-modification conversational, question & advice patterns (DO NOT burn CAD tokens)
+    const nonModPatterns = [
+      /^(?:hi|hello|hey|greetings|hola|good morning|good afternoon|good evening)\b/i,
+      /^(?:thanks|thank you|thx|ok|okay|cool|great|awesome|good job|nice|bye|goodbye)\b/i,
+      /^(?:what|which|who|where|when|why|how|can you|could you|explain|tell me|is it|does it|should i)\b/i,
+      /\b(?:how to slice|print settings|bed temperature|nozzle temp|infill|warping|slice|troubleshoot|advice|tips)\b/i,
     ];
 
-    if (chatPatterns.some((pattern) => pattern.test(text))) {
+    if (nonModPatterns.some((pattern) => pattern.test(text))) {
       return false;
     }
 
-    // Common CAD modification keywords
-    const modifyKeywords = [
-      "modify", "change", "update", "add", "remove", "delete", "make it",
-      "increase", "decrease", "reduce", "enlarge", "shrink", "taller",
-      "shorter", "wider", "narrower", "thicker", "thinner", "bigger", "smaller",
-      "radius", "diameter", "height", "width", "length", "thickness", "fillet",
-      "chamfer", "hole", "holes", "screw", "screws", "color", "material",
-      "glass", "metal", "plastic", "tolerance", "slot", "slots", "cut", "fuse",
-      "wall", "flange", "tab", "bracket", "mount", "dimension", "dimensions",
-      "mm", "degree", "degrees", "angle", "offset", "scale", "resize"
+    // 2. Strict CAD modification directives (Imperatives to edit the 3D model)
+    const modifyDirectives = [
+      /\b(?:modify|resize|scale|enlarge|shrink)\b/i,
+      /\bmake\s+(?:it|the\s+[\w\s]{1,25})\s+(?:wider|thicker|taller|bigger|smaller|longer|narrower|shorter)\b/i,
+      /\b(?:increase|decrease|reduce)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|size|depth)\b/i,
+      /\badd\s+(?:\d+\s+)?(?:[\w\s]{1,20}\s+)?(?:mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?)\b/i,
+      /\b(?:fillet|chamfer|round|bevel)\s+(?:the\s+)?(?:[\w\s]{1,20}\s+)?(?:edges?|corners?)\b/i,
+      /\bchange\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|color|material|dimension)\b/i,
+      /\bset\s+(?:the\s+)?\w+\s+to\s+\d+\b/i,
     ];
 
-    return modifyKeywords.some((kw) => text.includes(kw));
+    return modifyDirectives.some((pat) => pat.test(text));
+  }
+
+  function isCadTaskIntent(prompt: string): boolean {
+    const text = prompt.toLowerCase().trim();
+    if (!text) return false;
+
+    // 1. Casual conversational greetings and chit-chat (STRICTLY NORMAL CHAT)
+    const greetings = [
+      /^(?:hi|hello|hey|hola|howdy|sup|yo|greetings|good morning|good afternoon|good evening|good day)\b/i,
+      /^(?:who are you|what are you|what can you do|help|tell me about yourself|how are you)\b/i,
+      /^(?:thanks|thank you|thx|cool|nice|awesome|great|ok|okay|bye|goodbye)\b/i,
+    ];
+    if (greetings.some((pat) => pat.test(text))) return false;
+
+    // 2. Informational questions, advice, troubleshooting, comparisons (strictly non-CAD unless explicit design directive)
+    const isInformational =
+      /^(?:what|which|who|where|when|why|how|can\s+you\s+explain|tell\s+me\s+about|explain|describe|give\s+me\s+advice|suggest|recommend|review|summarize)\b/i.test(text) ||
+      /\b(?:how\s+to\s+slice|slicing\s+settings|infill|print\s+settings|bed\s+temperature|nozzle\s+temp|warping|layer\s+height|stringing|difference\s+between|compare)\b/i.test(text);
+
+    const hasDirectModelingCommand =
+      /\b(?:design|create|build|generate|make|model)\s+(?:me\s+)?(?:a|an|the|\d+|new)?\s*(?:3d|cad|solid|mesh|stl|step|printable|bracket|gear|nut|bolt|screw|washer|enclosure|box|case|housing|flange|mount|stand|cylinder|sphere|cone|clamp|clip|pipe|vase|planter|plate|wheel|pulley|chassis|staircase|foundation)\b/i.test(text);
+
+    if (isInformational && !hasDirectModelingCommand) return false;
+
+    // 3. Documentation, spec sheets, code reviews
+    if (/\b(?:documentation|document|docs|writeup|manual|guide|spec\s*sheet|overview|readme|summary|review\s+code|code\s+review)\b/i.test(text) && !hasDirectModelingCommand) {
+      return false;
+    }
+
+    // 4. Direct 3D print command
+    if (
+      /\b(?:3d\s*print|print\s+(?:in\s+)?3d|print\s+(?:me\s+)?(?:a|an)?)\s+[\w\s]{2,40}\b/i.test(text) &&
+      !/\b(?:how|why|settings?|temperature|bed|slicer|layer|infill|warping|issue)\b/i.test(text)
+    ) {
+      return true;
+    }
+
+    // 5. Explicit CAD creation verbs coupled with 3D/mechanical geometry objects
+    const hasCreationVerb = /\b(?:design|create|build|generate|model|make|construct|extrude|revolve|fabricate)\b/i.test(text);
+    const has3dTarget = /\b(?:3d|cad|solid|mesh|replicad|stl|step|printable|bracket|gear|nut|bolt|screw|washer|enclosure|box|case|housing|flange|mount|stand|cylinder|sphere|cone|clamp|clip|pipe|duct|hinge|tray|cover|lid|vase|wheel|pulley|chassis|staircase|foundation)\b/i.test(text);
+
+    return hasCreationVerb && has3dTarget;
+  }
+
+  function extractFileArtifacts(text: string, userPrompt?: string): { cleanText: string; artifacts: FileArtifact[] } {
+    const artifacts: FileArtifact[] = [];
+    const regex = /<file_artifact\s+filename="([^"]+)"(?:\s+type="([^"]+)")?(?:\s+title="([^"]+)")?>([\s\S]*?)<\/file_artifact>/gi;
+
+    let match;
+    let cleanText = text;
+
+    while ((match = regex.exec(text)) !== null) {
+      const filename = match[1];
+      const type = match[2] || filename.split(".").pop() || "txt";
+      const title = match[3] || filename;
+      const rawData = match[4].trim();
+
+      let data: any = rawData;
+      try {
+        data = JSON.parse(rawData);
+      } catch {
+        data = rawData;
+      }
+
+      artifacts.push({
+        id: "artifact-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+        filename,
+        type,
+        title,
+        data,
+      });
+    }
+
+    cleanText = cleanText.replace(/<file_artifact[\s\S]*?<\/file_artifact>/gi, "").trim();
+    cleanText = cleanText.replace(/<file_artifact[\s\S]*$/gi, "").trim();
+
+    // Intelligent Fallback: If user explicitly requested a document format and model generated content without <file_artifact> tag
+    if (artifacts.length === 0 && userPrompt && cleanText) {
+      const p = userPrompt.toLowerCase();
+      if (/\b(?:excel|\.xlsx|spreadsheet)\b/i.test(p)) {
+        const table = parseMarkdownTable(cleanText);
+        if (table) {
+          artifacts.push({
+            id: "artifact-" + Date.now() + "-xlsx",
+            filename: "Document.xlsx",
+            type: "xlsx",
+            title: "Generated Spreadsheet",
+            data: {
+              sheets: [
+                {
+                  name: "Sheet1",
+                  columns: table.headers,
+                  rows: table.rows,
+                },
+              ],
+            },
+          });
+        }
+      } else if (/\b(?:word\s*(?:doc|document)?|\.docx)\b/i.test(p)) {
+        artifacts.push({
+          id: "artifact-" + Date.now() + "-docx",
+          filename: "Document.docx",
+          type: "docx",
+          title: "Generated Word Document",
+          data: cleanText,
+        });
+      } else if (/\b(?:powerpoint|ppt|\.pptx|slide\s*deck|slides?)\b/i.test(p)) {
+        const slides = parseMarkdownToSlides(cleanText);
+        if (slides.length > 0) {
+          artifacts.push({
+            id: "artifact-" + Date.now() + "-pptx",
+            filename: "Presentation.pptx",
+            type: "pptx",
+            title: "Generated Presentation",
+            data: {
+              title: "Presentation",
+              slides,
+            },
+          });
+        }
+      } else if (/\b(?:pdf|\.pdf)\b/i.test(p)) {
+        artifacts.push({
+          id: "artifact-" + Date.now() + "-pdf",
+          filename: "Document.pdf",
+          type: "pdf",
+          title: "Generated PDF Document",
+          data: cleanText,
+        });
+      } else if (/\b(?:csv|\.csv)\b/i.test(p)) {
+        const table = parseMarkdownTable(cleanText);
+        if (table) {
+          const csvContent = [table.headers.join(","), ...table.rows.map((r) => r.join(","))].join("\n");
+          artifacts.push({
+            id: "artifact-" + Date.now() + "-csv",
+            filename: "Data.csv",
+            type: "csv",
+            title: "CSV Export",
+            data: csvContent,
+          });
+        }
+      } else if (/\b(?:markdown|\.md)\b/i.test(p)) {
+        artifacts.push({
+          id: "artifact-" + Date.now() + "-md",
+          filename: "Document.md",
+          type: "md",
+          title: "Markdown Document",
+          data: cleanText,
+        });
+      } else if (/\b(?:json|\.json)\b/i.test(p)) {
+        artifacts.push({
+          id: "artifact-" + Date.now() + "-json",
+          filename: "Data.json",
+          type: "json",
+          title: "JSON Data",
+          data: cleanText,
+        });
+      }
+    }
+
+    return { cleanText, artifacts };
+  }
+
+  function cleanDisplayContent(text: string): string {
+    let content = text.trim();
+    // Strip any thinking tags if present in token stream
+    content = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "").replace(/<thought>[\s\S]*?(?:<\/thought>|$)/gi, "");
+    // Strip any file_artifact blocks from live streaming display
+    content = content.replace(/<file_artifact[\s\S]*?(?:<\/file_artifact>|$)/gi, "");
+    // Strip any Replicad 3D CAD scripts / code blocks from being shown in chat
+    const replicadPattern = /```(?:typescript|ts|javascript|js|replicad)?[\s\S]*?(?:export\s+default\s+function|defaultParams|replicad)[\s\S]*?(?:```|$)/gi;
+    return content.replace(replicadPattern, "").trim();
   }
 
   function cleanFinalContent(explanation?: string, streamedContent?: string, hasReplicadCode?: boolean): string {
     let content = (explanation || streamedContent || "").trim();
-    // Only strip Replicad 3D CAD scripts if a 3D model was generated (so it doesn't duplicate the 3D viewer)
+    // Clean file_artifact blocks from final display (including unclosed tags)
+    content = content.replace(/<file_artifact[\s\S]*?(?:<\/file_artifact>|$)/gi, "").trim();
     if (hasReplicadCode) {
-      const replicadPattern = /```(?:typescript|ts|javascript|js|replicad)?\s*\n[\s\S]*?(?:export\s+default\s+function|defaultParams|replicad)[\s\S]*?```/gi;
-      const stripped = content.replace(replicadPattern, "").trim();
+      const stripped = cleanDisplayContent(content);
       return stripped || explanation || "Here is your 3D CAD model.";
     }
-    // For general code (Python, JS, HTML, etc.) or chat Q&A, keep all code blocks and markdown intact
     return content;
   }
 
@@ -208,11 +379,14 @@ export default function Home() {
       Boolean(previousAssistantMsg?.cadResponse?.replicad_code) &&
       isCadModificationIntent(promptText);
 
+    const isCadTask = isRefinement || isCadTaskIntent(promptText);
+
     const assistantMsgId = "msg-" + (Date.now() + 1);
     const initialAssistantMessage: ChatMessage = {
       id: assistantMsgId,
       role: "assistant",
       content: "",
+      isThinking: isCadTask,
       isStreaming: true,
       timestamp: Date.now() + 1,
     };
@@ -240,9 +414,11 @@ export default function Home() {
     setIsLoading(true);
 
     let accumulatedContent = "";
+    let accumulatedThoughts = "";
 
-    const onToken = (chunk: string) => {
-      accumulatedContent += chunk;
+    const onThought = (chunk: string) => {
+      if (!isCadTask) return;
+      accumulatedThoughts += chunk;
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== targetSessionId) return s;
@@ -252,8 +428,31 @@ export default function Home() {
               m.id === assistantMsgId
                 ? {
                   ...m,
-                  content: accumulatedContent,
+                  thoughts: accumulatedThoughts,
+                  isThinking: true,
+                }
+                : m
+            ),
+          };
+        })
+      );
+    };
+
+    const onToken = (chunk: string) => {
+      accumulatedContent += chunk;
+      const displayContent = cleanDisplayContent(accumulatedContent);
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                  ...m,
+                  content: displayContent,
                   isStreaming: true,
+                  isThinking: false,
                 }
                 : m
             ),
@@ -264,6 +463,7 @@ export default function Home() {
 
     const onReset = () => {
       accumulatedContent = "";
+      accumulatedThoughts = "";
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== targetSessionId) return s;
@@ -274,7 +474,9 @@ export default function Home() {
                 ? {
                   ...m,
                   content: "",
+                  thoughts: "",
                   isStreaming: true,
+                  isThinking: false,
                 }
                 : m
             ),
@@ -292,7 +494,7 @@ export default function Home() {
           previousAssistantMsg.cadResponse.replicad_code,
           previousAssistantMsg.cadResponse.parameters || {},
           settings,
-          () => { },
+          onThought,
           onToken,
           onReset
         );
@@ -300,23 +502,69 @@ export default function Home() {
         cadResult = await generateCadStream(
           promptText,
           settings,
-          () => { },
+          onThought,
           onToken,
           onReset
         );
       }
 
-      if (cadResult?.replicad_code) {
-        console.log("%c[REPLICAD TYPESCRIPT GENERATED]", "color: #38bdf8; font-weight: bold; font-size: 14px;");
-        console.log(cadResult.replicad_code);
+      let cadGeometry = undefined;
+      if (isCadTask && cadResult?.replicad_code) {
+        try {
+          const geo = await generateModelGeometry(cadResult.replicad_code, cadResult.parameters || {});
+          if (geo?.status === "success" && geo?.modelId) {
+            cadGeometry = geo;
+          }
+        } catch (cadErr: any) {
+          const errMsg = cadErr?.message || String(cadErr);
+          console.warn("[CAD SERVICE] Initial script execution failed:", errMsg);
+
+          // Commercial Production Self-Correction Loop:
+          // Immediately ask LLM to fix the runtime error and re-compile
+          try {
+            const repairPrompt = `The Replicad script generated produced this runtime execution error in the OpenCASCADE engine:\n"${errMsg}"\n\nPlease fix the code. Ensure all variables and parameters are explicitly defined and declared, and return the complete corrected Replicad TypeScript code.`;
+            const fixedResult = await refineCad(
+              repairPrompt,
+              cadResult.replicad_code,
+              cadResult.parameters || {},
+              settings
+            );
+            if (fixedResult?.replicad_code) {
+              const fixedGeo = await generateModelGeometry(fixedResult.replicad_code, fixedResult.parameters || {});
+              if (fixedGeo?.status === "success" && fixedGeo?.modelId) {
+                cadGeometry = fixedGeo;
+                cadResult = fixedResult;
+                console.log("[CAD AUTO-REPAIR] Successfully self-healed and generated 3D geometry!");
+              }
+            }
+          } catch (repairErr) {
+            console.error("[CAD AUTO-REPAIR] Self-healing repair failed:", repairErr);
+          }
+        }
+      }
+
+      const rawExplanation = cadResult.raw_explanation || accumulatedContent;
+      const { cleanText, artifacts } = extractFileArtifacts(rawExplanation, promptText);
+
+      if (cadResult?.parameters && artifacts.length > 0) {
+        artifacts.forEach((art) => {
+          if (typeof art.data === "object" && art.data !== null) {
+            art.data.parameters = { ...(art.data.parameters || {}), ...cadResult.parameters };
+          }
+        });
       }
 
       const finalAssistantMessage: ChatMessage = {
         id: assistantMsgId,
         role: "assistant",
-        content: cleanFinalContent(cadResult.raw_explanation, accumulatedContent, Boolean(cadResult.replicad_code)),
+        content: cleanFinalContent(cleanText, accumulatedContent, Boolean(isCadTask && cadResult.replicad_code)),
         isStreaming: false,
-        cadResponse: cadResult,
+        isThinking: false,
+        thoughts: isCadTask ? (accumulatedThoughts.trim() || cadResult.raw_thoughts || undefined) : undefined,
+        cadResponse: isCadTask && cadResult?.replicad_code ? cadResult : undefined,
+        geometry: isCadTask ? cadGeometry : undefined,
+        artifacts: artifacts.length > 0 ? artifacts : undefined,
+        userPrompt: promptText,
         timestamp: Date.now(),
       };
 
@@ -391,11 +639,14 @@ export default function Home() {
       Boolean(previousAssistantMsg?.cadResponse?.replicad_code) &&
       isCadModificationIntent(newPromptText);
 
+    const isCadTask = isRefinement || isCadTaskIntent(newPromptText);
+
     const assistantMsgId = "msg-" + (Date.now() + 1);
     const initialAssistantMessage: ChatMessage = {
       id: assistantMsgId,
       role: "assistant",
       content: "",
+      isThinking: isCadTask,
       isStreaming: true,
       timestamp: Date.now() + 1,
     };
@@ -423,9 +674,11 @@ export default function Home() {
     setIsLoading(true);
 
     let accumulatedContent = "";
+    let accumulatedThoughts = "";
 
-    const onToken = (chunk: string) => {
-      accumulatedContent += chunk;
+    const onThought = (chunk: string) => {
+      if (!isCadTask) return;
+      accumulatedThoughts += chunk;
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id !== targetSessionId) return s;
@@ -435,8 +688,55 @@ export default function Home() {
               m.id === assistantMsgId
                 ? {
                   ...m,
-                  content: accumulatedContent,
+                  thoughts: accumulatedThoughts,
+                  isThinking: true,
+                }
+                : m
+            ),
+          };
+        })
+      );
+    };
+
+    const onToken = (chunk: string) => {
+      accumulatedContent += chunk;
+      const displayContent = cleanDisplayContent(accumulatedContent);
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                  ...m,
+                  content: displayContent,
                   isStreaming: true,
+                  isThinking: false,
+                }
+                : m
+            ),
+          };
+        })
+      );
+    };
+
+    const onReset = () => {
+      accumulatedContent = "";
+      accumulatedThoughts = "";
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== targetSessionId) return s;
+          return {
+            ...s,
+            messages: s.messages.map((m) =>
+              m.id === assistantMsgId
+                ? {
+                  ...m,
+                  content: "",
+                  thoughts: "",
+                  isStreaming: true,
+                  isThinking: false,
                 }
                 : m
             ),
@@ -454,29 +754,76 @@ export default function Home() {
           previousAssistantMsg.cadResponse.replicad_code,
           previousAssistantMsg.cadResponse.parameters || {},
           settings,
-          () => { },
-          onToken
+          onThought,
+          onToken,
+          onReset
         );
       } else {
         cadResult = await generateCadStream(
           newPromptText,
           settings,
-          () => { },
-          onToken
+          onThought,
+          onToken,
+          onReset
         );
       }
 
-      if (cadResult?.replicad_code) {
-        console.log("%c[REPLICAD TYPESCRIPT GENERATED]", "color: #38bdf8; font-weight: bold; font-size: 14px;");
-        console.log(cadResult.replicad_code);
+      let cadGeometry = undefined;
+      if (isCadTask && cadResult?.replicad_code) {
+        try {
+          const geo = await generateModelGeometry(cadResult.replicad_code, cadResult.parameters || {});
+          if (geo?.status === "success" && geo?.modelId) {
+            cadGeometry = geo;
+          }
+        } catch (cadErr: any) {
+          const errMsg = cadErr?.message || String(cadErr);
+          console.warn("[CAD SERVICE] Initial script execution failed:", errMsg);
+
+          // Commercial Production Self-Correction Loop
+          try {
+            const repairPrompt = `The Replicad script generated produced this runtime execution error in the OpenCASCADE engine:\n"${errMsg}"\n\nPlease fix the code. Ensure all variables and parameters are explicitly defined and declared, and return the complete corrected Replicad TypeScript code.`;
+            const fixedResult = await refineCad(
+              repairPrompt,
+              cadResult.replicad_code,
+              cadResult.parameters || {},
+              settings
+            );
+            if (fixedResult?.replicad_code) {
+              const fixedGeo = await generateModelGeometry(fixedResult.replicad_code, fixedResult.parameters || {});
+              if (fixedGeo?.status === "success" && fixedGeo?.modelId) {
+                cadGeometry = fixedGeo;
+                cadResult = fixedResult;
+                console.log("[CAD AUTO-REPAIR] Successfully self-healed and generated 3D geometry!");
+              }
+            }
+          } catch (repairErr) {
+            console.error("[CAD AUTO-REPAIR] Self-healing repair failed:", repairErr);
+          }
+        }
+      }
+
+      const rawExplanation = cadResult.raw_explanation || accumulatedContent;
+      const { cleanText, artifacts } = extractFileArtifacts(rawExplanation, newPromptText);
+
+      if (cadResult?.parameters && artifacts.length > 0) {
+        artifacts.forEach((art) => {
+          if (typeof art.data === "object" && art.data !== null) {
+            art.data.parameters = { ...(art.data.parameters || {}), ...cadResult.parameters };
+          }
+        });
       }
 
       const finalAssistantMessage: ChatMessage = {
         id: assistantMsgId,
         role: "assistant",
-        content: cleanFinalContent(cadResult.raw_explanation, accumulatedContent, Boolean(cadResult.replicad_code)),
+        content: cleanFinalContent(cleanText, accumulatedContent, Boolean(isCadTask && cadResult.replicad_code)),
         isStreaming: false,
-        cadResponse: cadResult,
+        isThinking: false,
+        thoughts: isCadTask ? (accumulatedThoughts.trim() || cadResult.raw_thoughts || undefined) : undefined,
+        cadResponse: isCadTask && cadResult?.replicad_code ? cadResult : undefined,
+        geometry: isCadTask ? cadGeometry : undefined,
+        artifacts: artifacts.length > 0 ? artifacts : undefined,
+        userPrompt: newPromptText,
         timestamp: Date.now(),
       };
 
@@ -532,6 +879,8 @@ export default function Home() {
         return "Gemini";
       case "groq":
         return "Groq";
+      case "deepseek":
+        return "DeepSeek";
       case "openai":
       default:
         return "OpenAI";
@@ -627,18 +976,25 @@ export default function Home() {
                 </div>
               </div>
             )}
-
             {/* Conversation Messages */}
-            {activeSession?.messages.map((message) => (
-              <ChatMessageItem
-                key={message.id}
-                message={message}
-                onResubmitPrompt={handleResubmitPrompt}
-                onRefinePrompt={(suggestion) => handleSendMessage(suggestion)}
-                onOpenSettings={() => setIsSettingsOpen(true)}
-                isLoading={isLoading}
-              />
-            ))}
+            {activeSession?.messages.map((message, idx) => {
+              const previousUserPrompt =
+                idx > 0 && activeSession.messages[idx - 1].role === "user"
+                  ? activeSession.messages[idx - 1].content
+                  : undefined;
+
+              return (
+                <ChatMessageItem
+                  key={message.id}
+                  message={message}
+                  userPrompt={message.userPrompt || previousUserPrompt}
+                  onResubmitPrompt={handleResubmitPrompt}
+                  onRefinePrompt={(suggestion) => handleSendMessage(suggestion)}
+                  onOpenSettings={() => setIsSettingsOpen(true)}
+                  isLoading={isLoading}
+                />
+              );
+            })}
 
             {/* Loading Indicator (only shown if not actively streaming an in-place message) */}
             {isLoading && !activeSession?.messages.some((m) => m.isStreaming) && (

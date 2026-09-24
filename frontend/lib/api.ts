@@ -1,0 +1,600 @@
+import { AppSettings, CadGenerationResponse, CadGeometryResponse, ProviderType } from "./types";
+
+export function getProviderParams(settings: AppSettings, providerOverride?: ProviderType) {
+  const provider = providerOverride || settings.selectedProvider;
+  let apiKey: string | undefined = undefined;
+  let chatModel: string | undefined = undefined;
+  let cadModel: string | undefined = undefined;
+  let baseUrl: string | undefined = undefined;
+
+  if (provider === "anthropic") {
+    apiKey = settings.anthropicApiKey || undefined;
+    chatModel = settings.anthropicChatModel || "claude-3-5-haiku-20241022";
+    cadModel = settings.anthropicCadModel || "claude-3-5-sonnet-20241022";
+  } else if (provider === "openai") {
+    apiKey = settings.openaiApiKey || undefined;
+    chatModel = settings.openaiChatModel || "gpt-4o-mini";
+    cadModel = settings.openaiCadModel || "gpt-4o";
+    baseUrl = settings.openaiBaseUrl || undefined;
+  } else if (provider === "gemini") {
+    apiKey = settings.geminiApiKey || undefined;
+    chatModel = settings.geminiChatModel || "gemini-3.5-flash-lite";
+    cadModel = settings.geminiCadModel || "gemini-3.8-flash";
+  } else if (provider === "groq") {
+    apiKey = settings.groqApiKey || undefined;
+    chatModel = settings.groqChatModel || "openai/gpt-oss-20b";
+    cadModel = settings.groqCadModel || "llama-3.3-70b-versatile";
+    baseUrl = "https://api.groq.com/openai/v1";
+  } else if (provider === "deepseek") {
+    apiKey = settings.deepseekApiKey || undefined;
+    chatModel = settings.deepseekChatModel || "deepseek-chat";
+    cadModel = settings.deepseekCadModel || "deepseek-chat";
+    baseUrl = settings.deepseekBaseUrl || "https://api.deepseek.com";
+  } else if (provider === "ollama") {
+    chatModel = settings.ollamaModel || undefined;
+    cadModel = settings.ollamaModel || undefined;
+    baseUrl = settings.ollamaBaseUrl || undefined;
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Provider": provider,
+  };
+
+  if (apiKey) {
+    headers["X-API-Key"] = apiKey;
+    headers["Authorization"] = `Bearer ${apiKey}`;
+    if (provider === "openai") headers["X-OpenAI-API-Key"] = apiKey;
+    if (provider === "anthropic") headers["X-Anthropic-API-Key"] = apiKey;
+    if (provider === "gemini") headers["X-Gemini-API-Key"] = apiKey;
+    if (provider === "groq") headers["X-Groq-API-Key"] = apiKey;
+    if (provider === "deepseek") headers["X-DeepSeek-API-Key"] = apiKey;
+  }
+
+  if (chatModel) {
+    headers["X-Chat-Model"] = chatModel;
+  }
+  if (cadModel) {
+    headers["X-CAD-Model"] = cadModel;
+  }
+  if (baseUrl) {
+    headers["X-Base-URL"] = baseUrl;
+  }
+
+  return { provider, apiKey, chatModel, cadModel, baseUrl, headers };
+}
+
+export async function generateCad(
+  prompt: string,
+  settings: AppSettings,
+  constraints?: Record<string, any>
+): Promise<CadGenerationResponse> {
+  const backendUrl = settings.backendUrl.replace(/\/+$/, "");
+  const endpoint = `${backendUrl}/api/v1/llm/generate`;
+
+  const { provider, apiKey, chatModel, cadModel, baseUrl, headers } = getProviderParams(settings);
+
+  const payload: Record<string, any> = {
+    prompt,
+    provider,
+    chat_model: chatModel,
+    cad_model: cadModel,
+    api_key: apiKey,
+    base_url: baseUrl,
+    temperature: settings.temperature,
+    constraints: constraints || {},
+  };
+
+  try {
+    const response = await robustFetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      let errorMsg = `Server error ${response.status}`;
+      try {
+        const errorJson = await response.json();
+        errorMsg = parseDetailMessage(errorJson.detail, errorMsg);
+      } catch {
+        // fallback to status text
+      }
+      throw new Error(formatErrorMessage(errorMsg, provider));
+    }
+
+    return await response.json();
+  } catch (err: any) {
+    throw err;
+  }
+}
+
+export async function refineCad(
+  prompt: string,
+  previousCode: string,
+  previousParameters: Record<string, any>,
+  settings: AppSettings
+): Promise<CadGenerationResponse> {
+  const backendUrl = settings.backendUrl.replace(/\/+$/, "");
+  const endpoint = `${backendUrl}/api/v1/llm/refine`;
+
+  const { provider, apiKey, chatModel, cadModel, baseUrl, headers } = getProviderParams(settings);
+
+  const payload: Record<string, any> = {
+    prompt,
+    previous_code: previousCode,
+    previous_parameters: previousParameters,
+    provider,
+    chat_model: chatModel,
+    cad_model: cadModel,
+    api_key: apiKey,
+    base_url: baseUrl,
+  };
+
+  try {
+    const response = await robustFetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      let errorMsg = `Server error ${response.status}`;
+      try {
+        const errorJson = await response.json();
+        errorMsg = parseDetailMessage(errorJson.detail, errorMsg);
+      } catch {
+        // fallback
+      }
+      throw new Error(formatErrorMessage(errorMsg, provider));
+    }
+
+    return await response.json();
+  } catch (err: any) {
+    throw err;
+  }
+}
+
+export async function verifyProviderCredentials(
+  settings: AppSettings,
+  providerOverride?: ProviderType
+): Promise<{ ok: boolean; message: string }> {
+  const backendUrl = settings.backendUrl.replace(/\/+$/, "");
+  const endpoint = `${backendUrl}/api/v1/llm/verify-key`;
+
+  const { provider, apiKey, chatModel, baseUrl, headers } = getProviderParams(settings, providerOverride);
+
+  const payload = {
+    provider,
+    api_key: apiKey,
+    model: chatModel,
+    base_url: baseUrl,
+  };
+
+  try {
+    const response = await robustFetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      let errorMsg = `Server error ${response.status}`;
+      try {
+        const errorJson = await response.json();
+        errorMsg = errorJson.detail || errorMsg;
+      } catch {
+        // fallback
+      }
+      return { ok: false, message: errorMsg };
+    }
+
+    const data = await response.json();
+    return {
+      ok: Boolean(data.valid),
+      message: data.message || (data.valid ? "Credentials verified successfully!" : "Credential verification failed."),
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      message: err.message?.includes("Failed to fetch")
+        ? `Unable to reach CAD service at ${backendUrl}. Check backend connection.`
+        : err.message || "Failed to verify credentials",
+    };
+  }
+}
+
+export async function checkBackendHealth(backendUrl: string): Promise<{ ok: boolean; message: string; data?: any }> {
+  const cleanUrl = backendUrl.replace(/\/+$/, "");
+  try {
+    const res = await robustFetch(`${cleanUrl}/api/v1/llm/health`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return { ok: true, message: `Connected! Provider: ${data.provider}, Status: ${data.status}`, data };
+    }
+    return { ok: false, message: `Server returned HTTP ${res.status}` };
+  } catch (e: any) {
+    return { ok: false, message: e.message || "Failed to reach backend service" };
+  }
+}
+
+function parseDetailMessage(detail: any, defaultMsg: string): string {
+  if (!detail) return defaultMsg;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d: any) => d.msg || (typeof d === "string" ? d : JSON.stringify(d))).join("; ");
+  }
+  if (typeof detail === "object" && detail.msg) return detail.msg;
+  return defaultMsg;
+}
+
+export function formatErrorMessage(errText: string, provider?: string): string {
+  const clean = (errText || "").trim();
+  const lower = clean.toLowerCase();
+
+  // 1. Rate limit / Quota exceeded error detection across all providers
+  if (
+    lower.includes("429") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("credit balance") ||
+    lower.includes("insufficient_quota")
+  ) {
+    return "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings.";
+  }
+
+  // 2. Authentication error
+  if (
+    lower.includes("api_key") ||
+    lower.includes("api key") ||
+    lower.includes("unauthorized") ||
+    lower.includes("401") ||
+    lower.includes("forbidden") ||
+    lower.includes("403")
+  ) {
+    return "Authentication failed: Invalid or missing API key. Please check your credentials in Settings.";
+  }
+
+  // 3. Upstream timeout / Deadline exceeded error
+  if (
+    lower.includes("504") ||
+    lower.includes("deadline_exceeded") ||
+    lower.includes("deadline expired") ||
+    lower.includes("deadline") ||
+    lower.includes("timeout") ||
+    lower.includes("timed out")
+  ) {
+    return `Upstream service timeout: The ${provider ? provider.toUpperCase() : "AI"} service took longer than expected to complete. Please retry or select another provider in Settings.`;
+  }
+
+  // 3. Network error
+  if (
+    !clean ||
+    lower === "network error" ||
+    lower.includes("failed to fetch") ||
+    lower.includes("cannot connect")
+  ) {
+    return `Network error: Unable to connect to ${provider ? provider.toUpperCase() : "AI"} service. Please check your internet connection and API key.`;
+  }
+
+  return clean;
+}
+
+
+async function robustFetch(url: string, options: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, options);
+  } catch (err: any) {
+    // If localhost failed (common Windows IPv6 resolution issue where uvicorn binds to 127.0.0.1), fallback
+    if (url.includes("localhost:8000")) {
+      try {
+        const fallbackUrl = url.replace("localhost:8000", "127.0.0.1:8000");
+        return await fetch(fallbackUrl, options);
+      } catch { }
+    } else if (url.includes("127.0.0.1:8000")) {
+      try {
+        const fallbackUrl = url.replace("127.0.0.1:8000", "localhost:8000");
+        return await fetch(fallbackUrl, options);
+      } catch { }
+    }
+    throw new Error(
+      `Cannot connect to backend server at ${url}. Please verify that the backend is running.`
+    );
+  }
+}
+
+async function streamSseHelper(
+  endpoint: string,
+  payload: Record<string, any>,
+  headers: Record<string, string>,
+  onThought: (chunk: string) => void,
+  onToken: (chunk: string) => void,
+  onReset?: () => void
+): Promise<CadGenerationResponse> {
+  const requestHeaders = {
+    ...headers,
+    Accept: "text/event-stream",
+  };
+
+  const response = await robustFetch(endpoint, {
+    method: "POST",
+    headers: requestHeaders,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Server error ${response.status}`;
+    try {
+      const errorJson = await response.json();
+      errorMsg = parseDetailMessage(errorJson.detail, errorMsg);
+    } catch { }
+    throw new Error(formatErrorMessage(errorMsg, payload.provider));
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Streaming is not supported by your browser or server");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResult: CadGenerationResponse | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const jsonStr = trimmed.slice(5).trim();
+      if (!jsonStr) continue;
+
+      try {
+        const data = JSON.parse(jsonStr);
+        if (data.type === "reset") {
+          onReset?.();
+        } else if (data.type === "thought" && data.content) {
+          onThought(data.content);
+        } else if (data.type === "token" && data.content) {
+          onToken(data.content);
+        } else if (data.type === "done" && data.metadata) {
+          finalResult = data.metadata as CadGenerationResponse;
+        } else if (data.type === "error" && data.error) {
+          throw new Error(formatErrorMessage(data.error, payload.provider));
+        }
+      } catch (e: any) {
+        if (e.message && !e.message.includes("JSON")) throw e;
+      }
+    }
+  }
+
+  // Process any remaining text in buffer after stream ends
+  if (buffer.trim()) {
+    const lines = buffer.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const jsonStr = trimmed.slice(5).trim();
+      if (!jsonStr) continue;
+      try {
+        const data = JSON.parse(jsonStr);
+        if (data.type === "reset") {
+          onReset?.();
+        } else if (data.type === "thought" && data.content) {
+          onThought(data.content);
+        } else if (data.type === "token" && data.content) {
+          onToken(data.content);
+        } else if (data.type === "done" && data.metadata) {
+          finalResult = data.metadata as CadGenerationResponse;
+        }
+      } catch { }
+    }
+  }
+
+  if (!finalResult) {
+    // Graceful fallback so partial/streamed text is preserved even if connection closed
+    finalResult = {
+      prompt_id: "stream-" + Date.now(),
+      replicad_code: "",
+      raw_explanation: "",
+      parameters: {},
+      parameter_definitions: [],
+      parts: [],
+      materials_used: [],
+      has_glass: false,
+      provider: payload.provider || "llm",
+      model: payload.model || "default",
+      token_usage: 0,
+      cached: false,
+    };
+  }
+
+  return finalResult;
+}
+
+export async function generateCadStream(
+  prompt: string,
+  settings: AppSettings,
+  onThought: (chunk: string) => void,
+  onToken: (chunk: string) => void,
+  onReset?: () => void,
+  constraints?: Record<string, any>
+): Promise<CadGenerationResponse> {
+  const backendUrl = settings.backendUrl.replace(/\/+$/, "");
+  const endpoint = `${backendUrl}/api/v1/llm/generate/stream`;
+  const { provider, apiKey, chatModel, cadModel, baseUrl, headers } = getProviderParams(settings);
+
+  const payload: Record<string, any> = {
+    prompt,
+    provider,
+    chat_model: chatModel,
+    cad_model: cadModel,
+    api_key: apiKey,
+    base_url: baseUrl,
+    temperature: settings.temperature,
+    constraints: constraints || {},
+  };
+
+  return streamSseHelper(endpoint, payload, headers, onThought, onToken, onReset);
+}
+
+export async function refineCadStream(
+  prompt: string,
+  previousCode: string,
+  previousParameters: Record<string, any>,
+  settings: AppSettings,
+  onThought: (chunk: string) => void,
+  onToken: (chunk: string) => void,
+  onReset?: () => void
+): Promise<CadGenerationResponse> {
+  const backendUrl = settings.backendUrl.replace(/\/+$/, "");
+  const endpoint = `${backendUrl}/api/v1/llm/refine/stream`;
+  const { provider, apiKey, chatModel, cadModel, baseUrl, headers } = getProviderParams(settings);
+
+  const payload: Record<string, any> = {
+    prompt,
+    previous_code: previousCode,
+    previous_parameters: previousParameters,
+    provider,
+    chat_model: chatModel,
+    cad_model: cadModel,
+    api_key: apiKey,
+    base_url: baseUrl,
+  };
+
+  return streamSseHelper(endpoint, payload, headers, onThought, onToken, onReset);
+}
+
+export function getCadDownloadUrl(
+  modelId: string,
+  format: "step" | "stl" | "dxf",
+  baseUrl: string = "http://localhost:8002"
+): string {
+  const cleanUrl = baseUrl.replace(/\/+$/, "");
+  return `${cleanUrl}/api/v1/cad/download/${modelId}/${format}`;
+}
+
+export async function downloadCadFileBlob(
+  modelId: string,
+  format: "step" | "stl" | "dxf",
+  cadResponse?: CadGenerationResponse | null,
+  baseUrl: string = "http://localhost:8002"
+): Promise<Blob> {
+  const cleanUrl = baseUrl.replace(/\/+$/, "");
+  const downloadUrl = `${cleanUrl}/api/v1/cad/download/${modelId}/${format}`;
+
+  const tryFetch = async (targetUrl: string) => {
+    return await fetch(targetUrl, { signal: AbortSignal.timeout(10000) });
+  };
+
+  let res: Response | null = null;
+  try {
+    res = await tryFetch(downloadUrl);
+  } catch {
+    if (cleanUrl.includes("localhost:8002")) {
+      try {
+        res = await tryFetch(downloadUrl.replace("localhost:8002", "127.0.0.1:8002"));
+      } catch {
+        res = null;
+      }
+    }
+  }
+
+  if (res && res.ok) {
+    return await res.blob();
+  }
+
+  // Fallback: If in-memory cache expired on cad-service, re-export on the fly
+  if (cadResponse?.replicad_code) {
+    const tryExport = async (targetHost: string) => {
+      const exportRes = await fetch(`${targetHost}/api/v1/cad/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          script: cadResponse.replicad_code,
+          parameters: cadResponse.parameters || {},
+          format,
+        }),
+      });
+      if (!exportRes.ok) return null;
+      const data = await exportRes.json();
+      if (!data.downloadUrl) return null;
+      const retryRes = await fetch(`${targetHost}${data.downloadUrl}`);
+      if (retryRes.ok) {
+        return await retryRes.blob();
+      }
+      return null;
+    };
+
+    let blob = await tryExport(cleanUrl).catch(() => null);
+    if (!blob && cleanUrl.includes("localhost:8002")) {
+      blob = await tryExport("http://127.0.0.1:8002").catch(() => null);
+    }
+    if (blob) return blob;
+  }
+
+  throw new Error(`Failed to download ${format.toUpperCase()} file (Server returned ${res?.status || "error"})`);
+}
+
+
+export async function generateModelGeometry(
+  script: string,
+  parameters: Record<string, any> = {},
+  cadServiceUrl: string = "http://localhost:8002"
+): Promise<CadGeometryResponse | null> {
+  const cleanUrl = cadServiceUrl.replace(/\/+$/, "");
+
+  const tryFetch = async (targetUrl: string) => {
+    return await fetch(`${targetUrl}/api/v1/cad/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ script, parameters }),
+      signal: AbortSignal.timeout(15000),
+    });
+  };
+
+  let lastError: Error | null = null;
+  try {
+    const res = await tryFetch(cleanUrl);
+    if (res.ok) {
+      return (await res.json()) as CadGeometryResponse;
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      lastError = new Error(errData.error || `CAD service error (${res.status})`);
+    }
+  } catch (err: any) {
+    lastError = err;
+    // If localhost failed (Windows IPv6 fallback)
+    if (cleanUrl.includes("localhost:8002")) {
+      try {
+        const fallbackUrl = cleanUrl.replace("localhost:8002", "127.0.0.1:8002");
+        const res = await tryFetch(fallbackUrl);
+        if (res.ok) {
+          return (await res.json()) as CadGeometryResponse;
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          lastError = new Error(errData.error || `CAD service error (${res.status})`);
+        }
+      } catch (fallbackErr: any) {
+        lastError = fallbackErr;
+      }
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+  return null;
+}
+
