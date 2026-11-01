@@ -61,11 +61,11 @@ def _build_registry() -> Dict[str, ProviderModelConfig]:
                 "qwen-qwq-32b",
                 "llama-3.1-8b-instant",
             ),
-            chat_model=getattr(settings, "groq_fast_model", "openai/gpt-oss-20b"),
+            chat_model=getattr(settings, "groq_fast_model", "llama-3.1-8b-instant"),
             chat_fallbacks=(
                 "llama-3.1-8b-instant",
                 "deepseek-r1-distill-llama-70b",
-                "openai/gpt-oss-20b",
+                "llama-3.3-70b-versatile",
             ),
         ),
         "openai": ProviderModelConfig(
@@ -189,7 +189,7 @@ def get_models_to_try(
 
 
 def is_retryable_model_error(error: Exception) -> bool:
-    """Checks if an error indicates rate limit, quota exhaustion, or temporary capacity overload."""
+    """Checks if an error indicates rate limit, quota exhaustion, temporary capacity overload, or model unavailability."""
     err_str = str(error).lower()
     retryable_signatures = [
         "429",
@@ -208,7 +208,23 @@ def is_retryable_model_error(error: Exception) -> bool:
         "deadline",
         "timeout",
         "timed out",
+        "404",
+        "model_not_found",
         "model not found",
+        "does not exist",
+        "not exist",
+        "do not have access",
         "not available",
+        "not found",
+        "unknown model",
+        "decommissioned",
+        "deprecated",
+        "tool choice is none",
+        "model called a tool",
+        "model_terms_required",
+        "terms_required",
+        "terms acceptance",
+        "accept the terms",
+        "requires terms",
     ]
     return any(sig in err_str for sig in retryable_signatures)

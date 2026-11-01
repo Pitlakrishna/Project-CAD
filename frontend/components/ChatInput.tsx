@@ -7,13 +7,16 @@ interface ChatInputProps {
   isLoading: boolean;
   selectedProvider: ProviderType;
   onOpenSettings: () => void;
+  engineMode?: "auto" | "cad" | "threejs";
+  onEngineModeChange?: (mode: "auto" | "cad" | "threejs") => void;
 }
 
 const PROMPT_SUGGESTIONS = [
-  { label: "Electronics Junction Box", prompt: "Create an electronics junction box with mounting holes, a clear glass inspection lid, and stainless steel fasteners" },
-  { label: "Camera Optical Tube", prompt: "Generate an optical camera lens housing barrel with precision inner threading and glass optics" },
-  { label: "Parametric Planetary Gearbox", prompt: "Design a parametric planetary gearbox carrier with sun, planet, and ring gear mounts in matte nylon" },
-  { label: "Drone Motor Bracket", prompt: "Create a lightweight drone motor mount bracket with 4x M3 screw slots and cable routing channels" },
+  { label: "🌲 Valley with River", prompt: "Create a photorealistic mountain valley landscape with a winding river and pine trees" },
+  { label: "🛠️ Electronics Junction Box", prompt: "Create an electronics junction box with mounting holes, a clear glass inspection lid, and stainless steel fasteners" },
+  { label: "🏡 Villa in Nature", prompt: "Design a 2-floor modern luxury villa surrounded by a landscaped grass lawn and trees" },
+  { label: "⚙️ Planetary Gearbox", prompt: "Design a parametric planetary gearbox carrier with sun, planet, and ring gear mounts in matte nylon" },
+  { label: "🛸 Drone Motor Mount", prompt: "Create a lightweight drone motor mount bracket with 4x M3 screw slots and cable routing channels" },
 ];
 
 export function ChatInput({
@@ -21,6 +24,8 @@ export function ChatInput({
   isLoading,
   selectedProvider,
   onOpenSettings,
+  engineMode = "auto",
+  onEngineModeChange,
 }: ChatInputProps) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -56,6 +61,52 @@ export function ChatInput({
 
   return (
     <div className="w-full max-w-3xl mx-auto px-4 pb-4">
+      {/* Engine Mode Selector Bar */}
+      <div className="flex items-center justify-between pb-2">
+        <div className="flex items-center gap-1 p-0.5 rounded-xl bg-[#171717] border border-[#262626]">
+          <button
+            type="button"
+            onClick={() => onEngineModeChange?.("auto")}
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              engineMode === "auto"
+                ? "bg-[#282828] text-white shadow-xs"
+                : "text-[#8e8e8e] hover:text-white"
+            }`}
+          >
+            ⚡ Auto
+          </button>
+          <button
+            type="button"
+            onClick={() => onEngineModeChange?.("cad")}
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              engineMode === "cad"
+                ? "bg-blue-600/30 text-blue-300 border border-blue-500/40 shadow-xs"
+                : "text-[#8e8e8e] hover:text-white"
+            }`}
+          >
+            🛠️ CAD Engineering
+          </button>
+          <button
+            type="button"
+            onClick={() => onEngineModeChange?.("threejs")}
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              engineMode === "threejs"
+                ? "bg-purple-600/30 text-purple-300 border border-purple-500/40 shadow-xs"
+                : "text-[#8e8e8e] hover:text-white"
+            }`}
+          >
+            🎨 3D WebGL Studio
+          </button>
+        </div>
+        <span className="text-[10px] text-[#737373] hidden sm:inline">
+          {engineMode === "auto"
+            ? "Smart auto-routing by prompt intent"
+            : engineMode === "cad"
+            ? "OpenCASCADE B-Rep solids & STEP/DXF"
+            : "Procedural Three.js WebGL & organic CGI"}
+        </span>
+      </div>
+
       {/* Quick Prompt Chips */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-2.5 no-scrollbar">
         {PROMPT_SUGGESTIONS.map((item, idx) => (

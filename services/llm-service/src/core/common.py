@@ -167,10 +167,73 @@ def handle_provider_error(
             f"Upstream provider timeout (504 Deadline Exceeded): {p_name} took longer than expected to complete. Please retry or select another model/provider in Settings."
         ) from error
 
-    if error and is_retryable_model_error(error):
+    # Check for context window / prompt length exceeded
+    is_context_limit = any(sig in err_lower for sig in (
+        "reduce the length",
+        "context_length",
+        "context length",
+        "maximum context length",
+        "prompt is too long",
+        "prompt_too_long",
+        "too many tokens",
+        "input is too long",
+        "string too long",
+        "exceeds the context window",
+        "context window",
+        "maximum prompt length",
+        "prompt length exceeds",
+        "tokens exceed",
+        "payload size exceeds",
+        "exceeds the maximum allowed tokens",
+        "token count exceeds",
+        "tokens >",
+        "param': 'messages'",
+        "param': \"messages\"",
+        "request is too large",
+        "messages or completion",
+    ))
+    if is_context_limit:
+        resolution_guide = (
+            f"Context Window Limit Exceeded ({p_name}): The conversation history, 3D CAD model, or prompt exceeds the provider's token limit.\n\n"
+            "How to resolve:\n"
+            "1. Click New Chat (+) in the sidebar to start fresh and reset the context window.\n"
+            "2. Switch to Google Gemini in Settings (⚙️) for a 1,000,000+ token free context window.\n"
+            "3. If using Groq free tier, upgrade to Groq Pay-As-You-Go in the GroqCloud Console for 128k context, or shorten earlier turns."
+        ) if provider_name.lower() != "gemini" else (
+            f"Context Window Limit Exceeded ({p_name}): The conversation history or 3D CAD model has exceeded the model's context capacity.\n\n"
+            "How to resolve:\n"
+            "1. Click New Chat (+) in the sidebar to start fresh and reset the conversation history.\n"
+            "2. In Settings (⚙️), select Gemini 1.5 Pro for up to 2,000,000 context tokens.\n"
+            "3. Shorten earlier turns or export your CAD code and start a new session."
+        )
+        raise ProviderException(resolution_guide) from error
+
+    # Only report rate limit if it is ACTUALLY a rate limit / quota exhaustion
+    is_rate_limit = any(sig in err_lower for sig in ("429", "resource_exhausted", "insufficient_quota", "rate_limit", "rate limit", "tpm", "rpm", "quota"))
+    if is_rate_limit:
         raise ProviderException(
-            "Rate limit exceeded: You have reached the API usage quota. Please switch to another provider in Settings."
+            f"Rate limit exceeded on {p_name}: You have reached the API usage quota. Please wait a moment or switch to another provider in Settings."
         ) from error
+
+    # Report model access or not-found errors specifically with real provider error
+    is_model_access = any(sig in err_lower for sig in ("404", "model_not_found", "model not found", "does not exist", "do not have access", "not available", "not found"))
+    if is_model_access:
+        raise ProviderException(
+            f"{p_name} model error: The requested model is not accessible or not found on your account. ({err_str})"
+        ) from error
+
+    # Model terms acceptance required
+    is_terms_required = any(sig in err_lower for sig in ("terms acceptance", "model_terms_required", "accept the terms", "requires terms"))
+    if is_terms_required:
+        raise ProviderException(
+            f"{p_name} model terms required: The model requires terms acceptance in the GroqCloud Console. Please accept the terms or switch to another model in Settings."
+        ) from error
+
+    if any(sig in err_lower for sig in ("401", "invalid_api_key", "authentication", "unauthorized")):
+        raise ProviderException(
+            f"{p_name} authentication failed: Please check your API key in Settings."
+        ) from error
+
     raise ProviderException(f"{p_name} {action} failed: {err_str}") from error
 
 

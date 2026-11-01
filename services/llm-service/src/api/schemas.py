@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
+from src.config import settings
 
 
 class MaterialType(str, Enum):
@@ -36,8 +37,14 @@ class ParameterDefinition(BaseModel):
     description: Optional[str] = Field(default=None, description="Human-readable parameter description")
 
 
+class ChatHistoryMessage(BaseModel):
+    role: str = Field(..., description="'user' | 'assistant'")
+    content: str = Field(..., description="Message text content")
+
+
 class GenerateCadRequest(BaseModel):
     prompt: str = Field(..., min_length=1, description="Natural language prompt describing the 3D parametric object or conversation")
+    history: Optional[List[ChatHistoryMessage]] = Field(default_factory=list, description="Recent conversation history for multi-turn context")
     provider: Optional[str] = Field(default=None, description="Optional override: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama' | 'deepseek'")
     model: Optional[str] = Field(default=None, description="Optional override for model name")
     chat_model: Optional[str] = Field(default=None, description="Optional model override for conversational / fast chat")
@@ -49,12 +56,14 @@ class GenerateCadRequest(BaseModel):
     user_id: Optional[str] = Field(default="anonymous", description="User identifier")
     constraints: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optional dimensional or material constraints")
     enable_search: Optional[bool] = Field(default=None, description="Enable Google Search Grounding for real-time web information")
+    engine_mode: Optional[str] = Field(default="auto", description="'auto' | 'cad' | 'threejs' | 'hybrid'")
 
 
 class RefineCadRequest(BaseModel):
     prompt: str = Field(..., min_length=1, description="Modification prompt, e.g. 'add a glass window to the front'")
     previous_code: str = Field(..., min_length=10, description="The previous Replicad TypeScript code to modify")
     previous_parameters: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Current parameter values")
+    history: Optional[List[ChatHistoryMessage]] = Field(default_factory=list, description="Recent conversation history for multi-turn context")
     provider: Optional[str] = Field(default=None)
     model: Optional[str] = Field(default=None)
     chat_model: Optional[str] = Field(default=None)
@@ -64,6 +73,7 @@ class RefineCadRequest(BaseModel):
     tenant_id: Optional[str] = Field(default=None)
     user_id: Optional[str] = Field(default="anonymous")
     enable_search: Optional[bool] = Field(default=None, description="Enable Google Search Grounding for real-time web information")
+    engine_mode: Optional[str] = Field(default="auto", description="'auto' | 'cad' | 'threejs'")
 
 
 class ValidateCadRequest(BaseModel):
@@ -84,9 +94,21 @@ class VerifyCredentialsResponse(BaseModel):
     message: str = Field(..., description="Human-readable verification result message")
 
 
+
+class ToolCallResult(BaseModel):
+    """A structured tool call result extracted from an LLM response."""
+    tool_name: str = Field(..., description="Tool identifier, e.g. 'generate_word_document'")
+    filename: str = Field(..., description="Download filename with extension, e.g. 'spec.docx'")
+    artifact_type: str = Field(..., description="File type: 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'csv'")
+    title: str = Field(..., description="Human-readable document title")
+    data: Dict[str, Any] = Field(default_factory=dict, description="Full structured JSON payload for the document")
+
+
 class CadGenerationResponse(BaseModel):
     prompt_id: str = Field(..., description="Unique UUID for this generation request")
+    engine_mode: Optional[str] = Field(default="cad", description="'cad' | 'threejs' | 'hybrid'")
     replicad_code: str = Field(default="", description="Cleaned, runnable Replicad TypeScript code")
+    threejs_code: Optional[str] = Field(default=None, description="Cleaned, runnable native Three.js procedural scene code")
     raw_explanation: Optional[str] = Field(default=None, description="CAD design commentary and explanation")
     raw_thoughts: Optional[str] = Field(default=None, description="Model internal thinking/reasoning process")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Extracted parameter dictionary")
@@ -100,6 +122,7 @@ class CadGenerationResponse(BaseModel):
     cached: bool = Field(default=False, description="Whether the result was served from Redis cache")
     latency_ms: float = Field(default=0.0, description="Execution time in milliseconds")
     grounding_metadata: Optional[Dict[str, Any]] = Field(default=None, description="Google Search grounding metadata (queries, sources)")
+    tool_calls: List[ToolCallResult] = Field(default_factory=list, description="Structured tool call outputs (document artifacts)")
 
 
 
@@ -108,4 +131,4 @@ class HealthResponse(BaseModel):
     provider: str
     cache_connected: bool
     rabbitmq_connected: bool
-    version: str = "0.1.0"
+    version: str = Field(default_factory=lambda: settings.app_version)

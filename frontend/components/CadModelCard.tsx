@@ -1,10 +1,26 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { CadGeometryResponse, CadGenerationResponse } from "../lib/types";
-import { getCadDownloadUrl, downloadCadFileBlob } from "../lib/api";
+import Link from "next/link";
+import dynamic from "next/dynamic";
+import { CadGeometryResponse, CadGenerationResponse, CadSceneResponse } from "../lib/types";
+import { getCadDownloadUrl, downloadCadFileBlob, fetchCadScene } from "../lib/api";
 import { generateBlueprintPackage } from "../lib/blueprintGenerator";
 import { downloadEngineeringBlueprintPdf } from "../lib/pdfGenerator";
+import { formatMass, formatVolume, resolveEngineeringMaterial } from "../lib/physicalMaterials";
+
+const StudioViewer3D = dynamic(
+  () => import("./StudioViewer3D").then((m) => m.StudioViewer3D),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full flex flex-col items-center justify-center bg-[#0f1115] text-white">
+        <div className="w-8 h-8 rounded-full border-2 border-t-blue-500 border-r-transparent border-b-transparent border-l-transparent animate-spin mb-2" />
+        <span className="text-[11px] text-zinc-400 font-mono">Loading 3D Engine...</span>
+      </div>
+    ),
+  }
+);
 
 export interface DetectedCadFormats {
   hasPromptIntent: boolean;
@@ -55,12 +71,14 @@ export function detectCadFormatIntent(prompt?: string): DetectedCadFormats {
     }
   }
 
-  // 2. DXF
+  // 2. DXF (2D AutoCAD Drawing Exchange Format)
   const dxfPatterns = [
     { regex: /\.dxf\b/i, label: ".dxf" },
     { regex: /\bdxf\s*(?:files?|formats?|drawings?|profiles?)?\b/i, label: "dxf" },
     { regex: /\b(?:export|download|save|give|get|generate|produce)\s+(?:me\s+)?(?:the\s+)?(?:as\s+)?(?:a\s+)?(?:\.)?dxf\b/i, label: "dxf" },
     { regex: /\blaser\s*cut(?:ting)?\b|\bwaterjet\b/i, label: "laser/cnc" },
+    { regex: /\b2d\s*(?:cad|drawing|floor\s*plan|layout|draft|vector|orthographic)\b/i, label: "2d cad" },
+    { regex: /\b(?:floor\s*plans?|floorplans?|architectur(?:e|al)|blueprints?)\b/i, label: "2d floor plan" },
   ];
 
   let wantsDxf = false;
@@ -77,6 +95,7 @@ export function detectCadFormatIntent(prompt?: string): DetectedCadFormats {
     { regex: /\.pdf\b/i, label: ".pdf" },
     { regex: /\b(?:export|download|save|give|get|generate|make)\s+(?:me\s+)?(?:a\s+)?pdf\b/i, label: "pdf" },
     { regex: /\bpdf\s*(?:drawing|blueprint|format|document|file)?\b/i, label: "pdf" },
+    { regex: /\b(?:floor\s*plans?|floorplans?|blueprints?)\b/i, label: "blueprint" },
   ];
 
   let wantsPdf = false;
@@ -89,8 +108,9 @@ export function detectCadFormatIntent(prompt?: string): DetectedCadFormats {
   }
 
   const blueprintPatterns = [
-    { regex: /\b2d\s*(?:design|drawing|blueprint|plan|layout|draft)?\b/i, label: "2d blueprint" },
+    { regex: /\b2d\s*(?:design|drawing|blueprint|plan|layout|draft|architectural)?\b/i, label: "2d blueprint" },
     { regex: /\bblueprint\b/i, label: "blueprint" },
+    { regex: /\b(?:floor\s*plans?|floorplans?|architectur(?:e|al)|schematic)\b/i, label: "architectural floor plan" },
     { regex: /\bdimensions?\b|\bdimenstions?\b/i, label: "dimensions" },
   ];
 
@@ -141,11 +161,49 @@ export interface CadModelCardProps {
   geometry: CadGeometryResponse;
   cadResponse?: CadGenerationResponse;
   userPrompt?: string;
+  onRefinePrompt?: (suggestion: string) => void;
 }
 
-export function CadModelCard({ geometry, cadResponse, userPrompt }: CadModelCardProps) {
+export function CadModelCard({ geometry, cadResponse, userPrompt, onRefinePrompt }: CadModelCardProps) {
   const [downloadingFormat, setDownloadingFormat] = useState<string | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+  const [showPreview, setShowPreview] = useState<boolean>(false);
+  const [previewScene, setPreviewScene] = useState<CadSceneResponse | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState<boolean>(false);
+
+  const togglePreview = async () => {
+    if (showPreview) {
+      setShowPreview(false);
+      return;
+    }
+    setShowPreview(true);
+    if (!previewScene) {
+      const threejsCode = cadResponse?.threejs_code || geometry?.threejs_code;
+      if (threejsCode) {
+        setPreviewScene({
+          status: "success",
+          modelId: geometry.modelId,
+          engine_mode: "threejs",
+          threejs_code: threejsCode,
+          metrics: geometry.metrics,
+          parts: [],
+          availableExports: ["stl"],
+        });
+        return;
+      }
+      try {
+        setLoadingPreview(true);
+        const data = await fetchCadScene(geometry.modelId);
+        if (data && data.status === "success") {
+          setPreviewScene(data);
+        }
+      } catch (err) {
+        console.error("Failed to load embedded CAD preview:", err);
+      } finally {
+        setLoadingPreview(false);
+      }
+    }
+  };
 
   // Parse prompt intent
   const intent = useMemo(() => detectCadFormatIntent(userPrompt), [userPrompt]);
@@ -199,8 +257,42 @@ export function CadModelCard({ geometry, cadResponse, userPrompt }: CadModelCard
   const triangles = geometry.metrics.triangleCount ?? 0;
   const faces = geometry.metrics.faceCount;
 
+  // Resolve material info and dynamic mass properties
+  const resolvedMat = resolveEngineeringMaterial(
+    geometry.metrics.material || cadResponse?.materials_used?.[0]
+  );
+  const materialName = geometry.metrics.materialName || resolvedMat.name;
+  const massKg = geometry.metrics.massKg ?? ((volume / 1e9) * resolvedMat.density);
+  const estimatedCost = geometry.metrics.estimatedCostUsd ?? (massKg * resolvedMat.costPerKg);
+
   // Short ID for clean look
   const shortId = geometry.modelId.slice(0, 8);
+
+  // Dynamic post-generation quick tweaks based on actual parametric dimensions (Strict Zero Hardcoding)
+  const dynamicTweaks = useMemo(() => {
+    if (!cadResponse?.parameters || !onRefinePrompt) return [];
+    const tweaks: { label: string; actionPrompt: string }[] = [];
+    const entries = Object.entries(cadResponse.parameters);
+    for (const [key, rawVal] of entries) {
+      const val = Number(rawVal);
+      if (!isNaN(val) && val > 0 && typeof rawVal !== "boolean") {
+        const cleanName = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        const delta = Math.max(1, Math.round(val * 0.2));
+        tweaks.push({
+          label: `${cleanName} +${delta}`,
+          actionPrompt: `Modify the 3D model: Increase ${key} from ${val} to ${val + delta}.`,
+        });
+        if (val - delta > 0) {
+          tweaks.push({
+            label: `${cleanName} -${delta}`,
+            actionPrompt: `Modify the 3D model: Decrease ${key} from ${val} to ${val - delta}.`,
+          });
+        }
+      }
+      if (tweaks.length >= 6) break;
+    }
+    return tweaks;
+  }, [cadResponse?.parameters, onRefinePrompt]);
 
   return (
     <div className="w-full my-3 rounded-2xl bg-[#161616] border border-[#272727] overflow-hidden shadow-lg transition-all">
@@ -215,12 +307,20 @@ export function CadModelCard({ geometry, cadResponse, userPrompt }: CadModelCard
           <div>
             <h4 className="text-xs font-semibold text-white tracking-wide flex items-center gap-1.5">
               <span>{blueprint.title}</span>
-              <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/40">
-                Ready
-              </span>
+              {geometry.engine_mode === "threejs" ? (
+                <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-purple-950/80 text-purple-300 border border-purple-800/40">
+                  🎨 WebGL Studio
+                </span>
+              ) : (
+                <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/40">
+                  Ready
+                </span>
+              )}
             </h4>
             <p className="text-[11px] text-[#8e8e8e]">
-              OpenCASCADE B-Rep Solid • ISO 7200 Specifications
+              {geometry.engine_mode === "threejs"
+                ? "Native Procedural WebGL • Three.js PBR"
+                : `OpenCASCADE B-Rep Solid • ${resolvedMat.standard}`}
             </p>
           </div>
         </div>
@@ -233,7 +333,7 @@ export function CadModelCard({ geometry, cadResponse, userPrompt }: CadModelCard
       </div>
 
       {/* 2. Compact Engineering Metrics Grid */}
-      <div className="grid grid-cols-3 gap-2 px-4 py-2.5 bg-[#141414] border-b border-[#222222]">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-4 py-2.5 bg-[#141414] border-b border-[#222222]">
         <div className="flex flex-col">
           <span className="text-[10px] uppercase tracking-wider text-[#6e6e6e] font-medium">
             Dimensions (WxDxH)
@@ -245,21 +345,80 @@ export function CadModelCard({ geometry, cadResponse, userPrompt }: CadModelCard
 
         <div className="flex flex-col">
           <span className="text-[10px] uppercase tracking-wider text-[#6e6e6e] font-medium">
-            Solid Volume
+            Material & Standard
           </span>
-          <span className="text-xs font-mono font-semibold text-emerald-400 mt-0.5 truncate">
-            {volume.toLocaleString()} <span className="text-[10px] text-[#737373]">mm³</span>
+          <span className="text-xs font-medium text-amber-400 mt-0.5 truncate" title={`${materialName} (${resolvedMat.standard})`}>
+            {materialName}
           </span>
         </div>
 
         <div className="flex flex-col">
           <span className="text-[10px] uppercase tracking-wider text-[#6e6e6e] font-medium">
-            Mesh Density
+            Mass & Cost
           </span>
-          <span className="text-xs font-mono font-semibold text-sky-400 mt-0.5 truncate">
-            {triangles.toLocaleString()} <span className="text-[10px] text-[#737373]">triangles {faces ? `(${faces}f)` : ""}</span>
+          <span className="text-xs font-mono font-semibold text-emerald-400 mt-0.5 truncate">
+            {formatMass(massKg)} <span className="text-[10px] text-[#737373]">(${estimatedCost.toFixed(2)})</span>
           </span>
         </div>
+
+        <div className="flex flex-col">
+          <span className="text-[10px] uppercase tracking-wider text-[#6e6e6e] font-medium">
+            Solid Volume
+          </span>
+          <span className="text-xs font-mono font-semibold text-sky-400 mt-0.5 truncate">
+            {volume.toLocaleString()} <span className="text-[10px] text-[#737373]">mm³</span>
+          </span>
+        </div>
+      </div>
+
+      {/* 2.5 Primary 3D Actions: Inline Quick Preview + Full-Screen Studio */}
+      <div className="p-3 bg-gradient-to-r from-blue-950/30 via-indigo-950/20 to-purple-950/30 border-b border-[#222222] flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={togglePreview}
+            className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+              showPreview
+                ? "bg-blue-600/30 border-blue-500/50 text-blue-200"
+                : "bg-white/10 hover:bg-white/15 border-white/10 text-white"
+            }`}
+          >
+            <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+            </svg>
+            <span>{showPreview ? "Hide 3D Preview" : "👁️ Quick 3D Preview"}</span>
+          </button>
+
+          <Link
+            href={`/viewer/${geometry.modelId}`}
+            target="_blank"
+            className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-500 hover:via-indigo-500 hover:to-violet-500 text-white font-semibold text-xs shadow-lg shadow-indigo-500/25 transition-all group/btn cursor-pointer text-center"
+          >
+            <span>Launch 3D Studio</span>
+            <span className="group-hover/btn:translate-x-0.5 transition-transform">↗</span>
+          </Link>
+        </div>
+
+        {showPreview && (
+          <div className="relative w-full h-80 rounded-xl overflow-hidden bg-[#0f1115] border border-white/10 mt-1 shadow-inner">
+            {loadingPreview ? (
+              <div className="w-full h-full flex flex-col items-center justify-center text-zinc-400 text-xs gap-2">
+                <div className="w-8 h-8 rounded-full border-2 border-t-blue-500 border-r-transparent border-b-transparent border-l-transparent animate-spin" />
+                <span className="font-mono">Loading 3D Mesh...</span>
+              </div>
+            ) : previewScene ? (
+              <StudioViewer3D
+                sceneData={previewScene}
+                userPrompt={userPrompt}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-zinc-500 text-xs">
+                3D Preview currently unavailable. Try launching the full studio.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 3. Universal 4-Deliverable Export Bar (STEP, STL, DXF, PDF all always available) */}
@@ -407,6 +566,31 @@ export function CadModelCard({ geometry, cadResponse, userPrompt }: CadModelCard
             </div>
           </button>
         </div>
+
+        {/* Dynamic Post-Generation Parametric Tweaks (Zero Hardcoding) */}
+        {dynamicTweaks.length > 0 && (
+          <div className="mt-3 pt-2.5 border-t border-[#222222]">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              <span className="text-[10px] uppercase tracking-wider font-semibold text-[#8e8e8e]">
+                Quick Parametric Adjustments
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {dynamicTweaks.map((tweak, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => onRefinePrompt?.(tweak.actionPrompt)}
+                  className="px-2.5 py-1 rounded-md bg-[#1f1f1f] hover:bg-[#2b2b2b] text-zinc-300 hover:text-white border border-[#2e2e2e] hover:border-blue-500/40 text-[11px] font-mono transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                  title={tweak.actionPrompt}
+                >
+                  <span>{tweak.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

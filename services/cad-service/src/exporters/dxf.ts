@@ -34,15 +34,33 @@ export async function exportToDXF(shapeOrDrawing: any): Promise<Buffer> {
   // 3. Robust ASCII DXF fallback for 3D Solids:
   // Extracts bounding box / face wireframe lines and outputs standard AutoCAD R12 DXF
   try {
-    const bb = shapeOrDrawing.boundingBox?.() || {
-      min: [0, 0, 0],
-      max: [100, 100, 50],
-    };
+    let minX = 0;
+    let minY = 0;
+    let maxX = 100;
+    let maxY = 100;
 
-    const minX = bb.min[0] || 0;
-    const minY = bb.min[1] || 0;
-    const maxX = bb.max[0] || 100;
-    const maxY = bb.max[1] || 100;
+    let bb: any = null;
+    try {
+      bb = typeof shapeOrDrawing.boundingBox === "function"
+        ? shapeOrDrawing.boundingBox()
+        : shapeOrDrawing.boundingBox;
+    } catch {
+      bb = null;
+    }
+
+    if (bb) {
+      if (bb.bounds && Array.isArray(bb.bounds) && bb.bounds.length === 2) {
+        minX = bb.bounds[0][0] ?? 0;
+        minY = bb.bounds[0][1] ?? 0;
+        maxX = bb.bounds[1][0] ?? 100;
+        maxY = bb.bounds[1][1] ?? 100;
+      } else if (bb.min && bb.max) {
+        minX = bb.min[0] ?? 0;
+        minY = bb.min[1] ?? 0;
+        maxX = bb.max[0] ?? 100;
+        maxY = bb.max[1] ?? 100;
+      }
+    }
 
     const w = maxX - minX;
     const d = maxY - minY;

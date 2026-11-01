@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     debug: bool = True
     port: int = 8000
     host: str = "0.0.0.0"
+    app_version: str = "0.1.0"
 
     # LLM Provider: 'gemini' | 'groq' | 'openai' | 'anthropic' | 'ollama' | 'deepseek'
     llm_provider: str = "gemini"
@@ -44,7 +45,7 @@ class Settings(BaseSettings):
     groq_api_key: Optional[str] = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_model: str = "llama-3.3-70b-versatile"
-    groq_fast_model: str = "openai/gpt-oss-20b"
+    groq_fast_model: str = "llama-3.1-8b-instant"
     groq_timeout_seconds: float = 60.0
 
     # Ollama Settings
@@ -78,7 +79,7 @@ class Settings(BaseSettings):
     cad_service_url: str = "http://localhost:8002"
     auto_repair_cad_errors: bool = True
 
-    # CORS
+    # CORS (default to wildcard for seamless frontend integration, customizable via env)
     cors_origins: List[str] = ["*"]
 
 

@@ -202,7 +202,7 @@ def test_groq_provider_routing_and_instantiation():
     assert cad_model == "llama-3.3-70b-versatile"
 
     chat_model = CadGenerationService.resolve_effective_model(provider_name="groq", is_cad_task=False)
-    assert chat_model == "openai/gpt-oss-20b"
+    assert chat_model == "llama-3.1-8b-instant"
 
     # Provider instantiation
     provider = get_llm_provider("groq", api_key="gsk_test_123")

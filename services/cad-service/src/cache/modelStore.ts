@@ -1,6 +1,20 @@
 import crypto from "crypto";
 import { GeometryMetrics } from "../engine/metrics.js";
 
+export interface CachedPart {
+  name: string;
+  shape: any;
+  color?: string;
+  material?: string;
+  opacity?: number;
+  roughness?: number;
+  metalness?: number;
+  transmission?: number;
+  ior?: number;
+  transparent?: boolean;
+  stlBuffer?: Buffer;
+}
+
 export interface CachedModel {
   modelId: string;
   shape: any;
@@ -11,6 +25,7 @@ export interface CachedModel {
     stl?: Buffer;
     dxf?: Buffer;
   };
+  parts?: CachedPart[];
 }
 
 class ModelStore {
@@ -37,11 +52,19 @@ class ModelStore {
   }
 
   get(modelId: string): CachedModel | undefined {
-    const item = this.cache.get(modelId);
+    let item = this.cache.get(modelId);
+    if (!item && modelId && modelId.length >= 6) {
+      for (const [key, val] of this.cache.entries()) {
+        if (key.startsWith(modelId) || modelId.startsWith(key)) {
+          item = val;
+          break;
+        }
+      }
+    }
     if (item) {
       // Refresh LRU position
-      this.cache.delete(modelId);
-      this.cache.set(modelId, item);
+      this.cache.delete(item.modelId);
+      this.cache.set(item.modelId, item);
     }
     return item;
   }

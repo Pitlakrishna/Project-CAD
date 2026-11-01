@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { ChatMessage } from "../lib/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { CadModelCard } from "./CadModelCard";
@@ -16,13 +16,13 @@ import {
   IconGear,
 } from "./icons";
 
-
 interface ChatMessageItemProps {
   message: ChatMessage;
   userPrompt?: string;
   onResubmitPrompt?: (messageId: string, newText: string) => void;
   onRefinePrompt?: (suggestion: string) => void;
   onOpenSettings?: () => void;
+  onNewChat?: () => void;
   isLoading?: boolean;
 }
 
@@ -32,6 +32,7 @@ export function ChatMessageItem({
   onResubmitPrompt,
   onRefinePrompt,
   onOpenSettings,
+  onNewChat,
   isLoading,
 }: ChatMessageItemProps) {
   const isUser = message.role === "user";
@@ -208,6 +209,78 @@ export function ChatMessageItem({
           <div className="w-full text-sm text-[#dcdcdc] leading-relaxed space-y-2.5 min-w-0">
             {message.error ? (
               (() => {
+                const errStr = typeof message.error === "string" ? message.error.toLowerCase() : "";
+                const contentStr = (message.content || "").toLowerCase();
+
+                const isContextLimit =
+                  contentStr.includes("context window limit") ||
+                  contentStr.includes("reduce the length") ||
+                  contentStr.includes("maximum context length") ||
+                  errStr.includes("reduce the length") ||
+                  errStr.includes("context_length") ||
+                  errStr.includes("context length") ||
+                  errStr.includes("maximum context length") ||
+                  errStr.includes("prompt is too long") ||
+                  errStr.includes("prompt_too_long") ||
+                  errStr.includes("too many tokens") ||
+                  errStr.includes("input is too long") ||
+                  errStr.includes("string too long") ||
+                  errStr.includes("exceeds the context window") ||
+                  errStr.includes("context window") ||
+                  errStr.includes("payload size exceeds") ||
+                  errStr.includes("exceeds the maximum allowed tokens") ||
+                  errStr.includes("token count exceeds") ||
+                  (errStr.includes("param") && errStr.includes("messages")) ||
+                  errStr.includes("messages or completion");
+
+                if (isContextLimit) {
+                  return (
+                    <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-200 space-y-3">
+                      <div className="flex items-start gap-3">
+                        <div className="p-1.5 rounded-lg bg-orange-500/20 text-orange-300 mt-0.5 shrink-0">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-orange-300 text-sm">Context Window Limit Exceeded</span>
+                          </div>
+                          <p className="text-orange-200/90 leading-relaxed text-xs">
+                            The conversation history, 3D CAD model, or prompt exceeds the provider's token limit.
+                          </p>
+                          <div className="text-[11px] text-orange-200/80 bg-orange-950/40 p-2.5 rounded-lg border border-orange-800/30 space-y-1">
+                            <div className="font-medium text-orange-300 mb-1">How to resolve:</div>
+                            <div>• <strong>Start New Chat</strong>: Resets the context window to full capacity.</div>
+                            <div>• <strong>Switch Provider</strong>: Google Gemini in Settings provides a 1,000,000+ token free context.</div>
+                            <div>• <strong>Upgrade Tier</strong>: Upgrading Groq to Pay-As-You-Go gives 128k context, or shorten earlier turns.</div>
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            {onNewChat && (
+                              <button
+                                type="button"
+                                onClick={onNewChat}
+                                className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                              >
+                                <span>➕</span> Start New Chat
+                              </button>
+                            )}
+                            {onOpenSettings && (
+                              <button
+                                type="button"
+                                onClick={onOpenSettings}
+                                className="px-3 py-1.5 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-200 font-medium text-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <span>⚙️</span> Open Settings
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
                 const isRateLimit =
                   (message.content && (
                     message.content.includes("Rate limit exceeded") ||
@@ -244,7 +317,7 @@ export function ChatMessageItem({
                 }
 
                 return (
-                  <div className="p-4 rounded-xl bg-red-950/30 border border-red-800/40 text-xs text-red-300">
+                  <div className="p-4 rounded-xl bg-red-950/30 border border-red-800/40 text-xs text-red-300 whitespace-pre-line">
                     {message.content}
                   </div>
                 );
@@ -282,7 +355,32 @@ export function ChatMessageItem({
                     geometry={message.geometry}
                     cadResponse={message.cadResponse}
                     userPrompt={userPrompt || message.userPrompt}
+                    onRefinePrompt={onRefinePrompt}
                   />
+                )}
+
+                {/* OpenCASCADE Solid Modeling Kernel Error Diagnostic */}
+                {message.cadError && !message.isStreaming && !message.geometry && (
+                  <div className="my-2 p-3 rounded-xl bg-amber-950/30 border border-amber-800/40 text-xs text-amber-200">
+                    <div className="flex items-center gap-2 font-semibold text-amber-300 mb-1">
+                      <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span>CAD Solid Modeling Engine Notice</span>
+                    </div>
+                    <p className="text-[11px] text-amber-200/90 leading-relaxed mb-2 font-mono break-all">
+                      {message.cadError}
+                    </p>
+                    {onRefinePrompt && (
+                      <button
+                        type="button"
+                        onClick={() => onRefinePrompt("Fix and recompile the Replicad code to resolve the OpenCASCADE solid modeling error.")}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-medium cursor-pointer transition-all active:scale-95"
+                      >
+                        Auto-Repair & Recompile 3D Solid
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {/* Dynamic File Artifacts (Word .docx, Excel .xlsx, PowerPoint .pptx, PDF, CSV) */}
@@ -293,7 +391,6 @@ export function ChatMessageItem({
                     ))}
                   </div>
                 )}
-
 
                 {/* Assistant Action Bar: Copy */}
                 {!message.isStreaming && Boolean(message.content) && (

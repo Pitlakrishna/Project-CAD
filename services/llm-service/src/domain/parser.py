@@ -10,6 +10,9 @@ from src.domain.models import ParsedCadModel
 class ReplicadParser:
     """Parses, sanitizes, and extracts structured metadata from Replicad TypeScript code."""
 
+    DEFAULT_PART_COLOR: str = "#3B82F6"
+    DEFAULT_PART_NAME: str = "MainSolid"
+
     UNSAFE_PATTERNS = [
         r"\beval\s*\(",
         r"\bFunction\s*\(",
@@ -209,11 +212,11 @@ class ReplicadParser:
 
         # Fallback if single shape returned or parts array not matched
         if not parts:
-            default_color = "#3b82f6"
+            default_color = cls.DEFAULT_PART_COLOR
             default_mat = MaterialType.PLASTIC
             parts.append(
                 PartVisualSchema(
-                    name="MainSolid",
+                    name=cls.DEFAULT_PART_NAME,
                     color=default_color,
                     material=default_mat,
                     opacity=1.0,
