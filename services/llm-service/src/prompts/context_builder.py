@@ -1,7 +1,8 @@
 """Context builder for assembling LLM prompts and message sequences."""
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from src.prompts.system_prompt import (
     CONVERSATIONAL_SYSTEM_PROMPT,
     CONVERSATIONAL_WITH_DOCS_SYSTEM_PROMPT,
@@ -76,7 +77,7 @@ class ContextBuilder:
         return bool(re.search(cls.THREEJS_SCENE_TARGETS, text, re.IGNORECASE))
 
     @classmethod
-    def is_cad_intent(cls, prompt: str, constraints: Optional[Dict[str, Any]] = None) -> bool:
+    def is_cad_intent(cls, prompt: str, constraints: dict[str, Any] | None = None) -> bool:
         """Determines if the prompt explicitly directs the system to generate, create, or modify a 2D/3D CAD,
         architectural floor plan, blueprint, or mechanical model.
         Prevents burning expensive CAD tokens on informational questions, 3D printing advice, explanations, or chat.
@@ -108,6 +109,28 @@ class ContextBuilder:
             text,
         ):
             return False
+
+        # Check for explicit CAD parametric modification directives (e.g. "make it taller", "add holes", "change color")
+        is_cad_modification = bool(
+            re.search(
+                r"\b(?:modify|edit|update|adjust|alter|tweak|revise|re-?engineer)\b|"
+                r"\b(?:resize|scale|enlarge|shrink|stretch|compress|expand)\b|"
+                r"\b(?:make|render|turn)\s+(?:it|this|the\s+[\w\s]{1,30})\s+(?:wider|thicker|taller|bigger|smaller|longer|narrower|shorter|deeper|flatter|higher|lower|larger|slimmer|round(?:er)?|square|hollow|solid)\b|"
+                r"\b(?:increase|decrease|reduce|double|halve|cut|boost|raise|lower)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|size|depth|clearance|tolerance|spacing|count|number|angle|dimension|scale|elevation)\b|"
+                r"\badd\s+(?:\d+\s+)?(?:[\w\s]{1,25}\s+)?(?:mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?|threads?|handles?|tabs?|flanges?|bevels?|trees?|lakes?|rivers?|mountains?|buildings?|rooms?|walls?|windows?|doors?)\b|"
+                r"\b(?:remove|delete|eliminate|take\s+away|cut\s+out)\s+(?:the\s+)?(?:[\w\s]{1,30})\b|"
+                r"\b(?:fillet|chamfer|round|bevel|hollow|pocket|extrude|revolve|cut|draft)\b|"
+                r"\b(?:change|set|switch|replace|swap)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|color|material|finish|texture|appearance|dimension|shape|size)\b|"
+                r"\b(?:color|paint|make)\s+(?:it|the\s+[\w\s]{1,20})\s+(?:red|blue|green|yellow|black|white|grey|gray|orange|purple|gold|silver|bronze|copper|chrome|metallic|transparent|opaque|glass)\b|"
+                r"\b(?:material|make\s+it\s+out\s+of)\s+(?:metal|aluminum|steel|brass|wood|plastic|resin|glass|concrete|stone|pla|abs|petg|nylon)\b|"
+                r"\b(?:set|make)\s+(?:the\s+)?\w+\s+(?:to|=)\s+\d+|"
+                r"\b(?:more|fewer|less)\s+(?:trees?|hills?|valleys?|foliage|mountains?|detail|segments?|facets?)\b|"
+                r"\b(?:taller|shorter|wider|thicker|narrower|longer|bigger|smaller|flatter|higher|lower)\b",
+                text,
+            )
+        )
+        if is_cad_modification:
+            return True
 
         # Check for direct modeling / design command (allows up to 6 intervening descriptive words/adjectives)
         has_explicit_design_request = bool(
@@ -187,12 +210,19 @@ class ContextBuilder:
         # 7. Explicit Parametric Modification Directives (Editing an existing CAD model)
         is_cad_modification = bool(
             re.search(
-                r"\b(modify|resize|scale|enlarge|shrink)\b|"
-                r"\bmake\s+(?:it|the\s+[\w\s]{1,25})\s+(wider|thicker|taller|bigger|smaller|longer|narrower|shorter)\b|"
-                r"\b(increase|decrease|reduce)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(radius|diameter|height|width|length|thickness|size|depth)\b|"
-                r"\badd\s+(?:\d+\s+)?(?:[\w\s]{1,20}\s+)?(mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?|rooms?|walls?|doors?|windows?)\b|"
-                r"\b(fillet|chamfer|round|bevel)\s+(?:the\s+)?(?:[\w\s]{1,20}\s+)?(edges?|corners?)\b|"
-                r"\bchange\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(radius|diameter|height|width|length|thickness|color|material|dimension)\b",
+                r"\b(?:modify|edit|update|adjust|alter|tweak|revise|re-?engineer)\b|"
+                r"\b(?:resize|scale|enlarge|shrink|stretch|compress|expand)\b|"
+                r"\b(?:make|render|turn)\s+(?:it|this|the\s+[\w\s]{1,30})\s+(?:wider|thicker|taller|bigger|smaller|longer|narrower|shorter|deeper|flatter|higher|lower|larger|slimmer|round(?:er)?|square|hollow|solid)\b|"
+                r"\b(?:increase|decrease|reduce|double|halve|cut|boost|raise|lower)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|size|depth|clearance|tolerance|spacing|count|number|angle|dimension|scale|elevation)\b|"
+                r"\badd\s+(?:\d+\s+)?(?:[\w\s]{1,25}\s+)?(?:mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?|threads?|handles?|tabs?|flanges?|bevels?|trees?|lakes?|rivers?|mountains?|buildings?|rooms?|walls?|windows?|doors?)\b|"
+                r"\b(?:remove|delete|eliminate|take\s+away|cut\s+out)\s+(?:the\s+)?(?:[\w\s]{1,30})\b|"
+                r"\b(?:fillet|chamfer|round|bevel|hollow|pocket|extrude|revolve|cut|draft)\b|"
+                r"\b(?:change|set|switch|replace|swap)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|color|material|finish|texture|appearance|dimension|shape|size)\b|"
+                r"\b(?:color|paint|make)\s+(?:it|the\s+[\w\s]{1,20})\s+(?:red|blue|green|yellow|black|white|grey|gray|orange|purple|gold|silver|bronze|copper|chrome|metallic|transparent|opaque|glass)\b|"
+                r"\b(?:material|make\s+it\s+out\s+of)\s+(?:metal|aluminum|steel|brass|wood|plastic|resin|glass|concrete|stone|pla|abs|petg|nylon)\b|"
+                r"\b(?:set|make)\s+(?:the\s+)?\w+\s+(?:to|=)\s+\d+|"
+                r"\b(?:more|fewer|less)\s+(?:trees?|hills?|valleys?|foliage|mountains?|detail|segments?|facets?)\b|"
+                r"\b(?:taller|shorter|wider|thicker|narrower|longer|bigger|smaller|flatter|higher|lower)\b",
                 text,
             )
         )
@@ -213,7 +243,7 @@ class ContextBuilder:
         return False
 
     @classmethod
-    def _format_history(cls, history: Optional[List[Any]], max_turns: int = 8) -> List[Dict[str, str]]:
+    def _format_history(cls, history: list[Any] | None, max_turns: int = 8) -> list[dict[str, str]]:
         """Optimizes and formats recent conversation history turns for LLM context.
         - Keeps up to max_turns recent messages (sliding window).
         - Condenses previous large code blocks and artifacts to minimize token usage and cost.
@@ -221,7 +251,7 @@ class ContextBuilder:
         if not history:
             return []
 
-        formatted: List[Dict[str, str]] = []
+        formatted: list[dict[str, str]] = []
         recent_history = history[-max_turns:]
 
         for msg in recent_history:
@@ -251,11 +281,11 @@ class ContextBuilder:
     def build_generation_messages(
         cls,
         user_prompt: str,
-        constraints: Optional[Dict[str, Any]] = None,
+        constraints: dict[str, Any] | None = None,
         include_examples: bool = False,
-        is_cad_task: Optional[bool] = None,
-        history: Optional[List[Any]] = None,
-    ) -> List[Dict[str, str]]:
+        is_cad_task: bool | None = None,
+        history: list[Any] | None = None,
+    ) -> list[dict[str, str]]:
         if is_cad_task is None:
             is_cad_task = cls.is_cad_intent(user_prompt, constraints)
 
@@ -315,8 +345,8 @@ class ContextBuilder:
     def build_threejs_messages(
         cls,
         user_prompt: str,
-        history: Optional[List[Any]] = None,
-    ) -> List[Dict[str, str]]:
+        history: list[Any] | None = None,
+    ) -> list[dict[str, str]]:
         """Builds prompt messages instructing the model to generate native procedural Three.js WebGL scene code."""
         formatted_history = cls._format_history(history)
         messages = [{"role": "system", "content": THREEJS_SCENE_SYSTEM_PROMPT}]
@@ -336,8 +366,8 @@ class ContextBuilder:
         cls,
         refinement_prompt: str,
         previous_code: str,
-        history: Optional[List[Any]] = None,
-    ) -> List[Dict[str, str]]:
+        history: list[Any] | None = None,
+    ) -> list[dict[str, str]]:
         """Builds prompt messages to refine or modify an existing Three.js WebGL scene."""
         formatted_history = cls._format_history(history)
         messages = [{"role": "system", "content": THREEJS_SCENE_SYSTEM_PROMPT}]
@@ -358,10 +388,10 @@ class ContextBuilder:
         cls,
         refinement_prompt: str,
         previous_code: str,
-        previous_parameters: Optional[Dict[str, Any]] = None,
-        is_cad_task: Optional[bool] = None,
-        history: Optional[List[Any]] = None,
-    ) -> List[Dict[str, str]]:
+        previous_parameters: dict[str, Any] | None = None,
+        is_cad_task: bool | None = None,
+        history: list[Any] | None = None,
+    ) -> list[dict[str, str]]:
         if is_cad_task is None:
             is_cad_task = cls.is_cad_intent(refinement_prompt)
 

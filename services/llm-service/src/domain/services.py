@@ -3,8 +3,11 @@
 import logging
 import re
 import uuid
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
+
 import httpx
+
 from src.api.schemas import (
     CadGenerationResponse,
     GenerateCadRequest,
@@ -13,12 +16,12 @@ from src.api.schemas import (
     ValidateCadRequest,
 )
 from src.config import settings
+from src.core.models import get_provider_config, sanitize_model
 from src.domain.parser import ReplicadParser
 from src.infrastructure.cache import PromptCache
 from src.infrastructure.messaging import EventPublisher
 from src.prompts.context_builder import ContextBuilder
 from src.providers import get_llm_provider
-from src.core.models import get_provider_config, sanitize_model
 from src.tools.schemas import ToolCallExtractor
 
 logger = logging.getLogger(__name__)
@@ -40,8 +43,8 @@ class CadGenerationService:
 
     def __init__(
         self,
-        cache: Optional[PromptCache] = None,
-        event_publisher: Optional[EventPublisher] = None,
+        cache: PromptCache | None = None,
+        event_publisher: EventPublisher | None = None,
     ):
         self.cache = cache or PromptCache()
         self.event_publisher = event_publisher or EventPublisher()
@@ -49,10 +52,10 @@ class CadGenerationService:
     @staticmethod
     def resolve_effective_model(
         provider_name: str,
-        requested_model: Optional[str] = None,
+        requested_model: str | None = None,
         is_cad_task: bool = True,
-        chat_model: Optional[str] = None,
-        cad_model: Optional[str] = None,
+        chat_model: str | None = None,
+        cad_model: str | None = None,
     ) -> str:
         """Dynamically routes to optimal model based on prompt intent, provider, and separate chat/cad model settings.
 
@@ -98,9 +101,9 @@ class CadGenerationService:
     @staticmethod
     async def _resolve_grounded_constraints(
         prompt: str,
-        constraints: Optional[Dict[str, Any]] = None,
+        constraints: dict[str, Any] | None = None,
         is_cad_task: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Pre-flight search grounding: automatically fetches certified engineering specs/dimensions
         and materials for real-world components when explicit user dimensions are not provided.
         """
@@ -118,7 +121,9 @@ class CadGenerationService:
         )
         if not has_explicit_dims and "verified_standard_spec" not in effective:
             try:
-                from src.tools.definitions.search_tool.executor import EngineeringSpecSearchExecutor
+                from src.tools.definitions.search_tool.executor import (
+                    EngineeringSpecSearchExecutor,
+                )
                 spec_res = await EngineeringSpecSearchExecutor.search(prompt)
                 if spec_res and spec_res.get("status") == "success" and spec_res.get("standard_envelope"):
                     effective["verified_standard_spec"] = {
@@ -136,9 +141,9 @@ class CadGenerationService:
     def _sanitize_tool_calls_and_explanation(
         prompt: str,
         is_cad_task: bool,
-        tool_calls: List[ToolCallResult],
-        explanation: Optional[str],
-    ) -> tuple[List[ToolCallResult], Optional[str]]:
+        tool_calls: list[ToolCallResult],
+        explanation: str | None,
+    ) -> tuple[list[ToolCallResult], str | None]:
         """Commercial guard: Document tools must only be returned when the user explicitly requests documents.
         Suppresses accidental model hallucinations during chit-chat, greetings, or pure CAD prompts.
         """
@@ -162,7 +167,7 @@ class CadGenerationService:
     async def _synthesize_cad_with_llm(
         self,
         provider,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model_name: str,
         user_prompt: str,
         initial_raw_response: str,
@@ -202,7 +207,7 @@ class CadGenerationService:
         return synth_parsed, synth_result.raw_response, synth_result.token_usage
 
     @staticmethod
-    def _extract_threejs_scene_code(raw_response: str) -> tuple[Optional[str], Optional[str]]:
+    def _extract_threejs_scene_code(raw_response: str) -> tuple[str | None, str | None]:
         """Extracts executable Three.js procedural scene code from LLM output."""
         if not raw_response:
             return None, None
@@ -230,11 +235,11 @@ class CadGenerationService:
     async def _synthesize_threejs_with_llm(
         self,
         provider,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model_name: str,
         user_prompt: str,
         initial_raw_response: str,
-    ) -> tuple[Optional[str], str, int]:
+    ) -> tuple[str | None, str, int]:
         """When a Three.js scene task is requested but the initial response omitted the code block,
         autonomously prompts the LLM to output the complete Three.js procedural scene script.
         """
@@ -263,7 +268,7 @@ class CadGenerationService:
     async def _validate_and_auto_repair(
         self,
         provider,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         model_name: str,
         initial_result,
         parsed,
@@ -552,7 +557,7 @@ class CadGenerationService:
 
     async def generate_cad_stream(
         self, request: GenerateCadRequest
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         prompt_id = str(uuid.uuid4())
         provider_name = (request.provider or settings.llm_provider).lower().strip()
         provider = get_llm_provider(provider_name, api_key=request.api_key, base_url=request.base_url)
@@ -977,7 +982,7 @@ class CadGenerationService:
 
     async def refine_cad_stream(
         self, request: RefineCadRequest
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         prompt_id = str(uuid.uuid4())
         provider_name = (request.provider or settings.llm_provider).lower().strip()
         provider = get_llm_provider(provider_name, api_key=request.api_key, base_url=request.base_url)
@@ -1188,9 +1193,9 @@ class CadGenerationService:
     async def verify_provider_credentials(
         self,
         provider_name: str,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
     ) -> tuple[bool, str]:
         """Instantiates provider with supplied credentials and tests connectivity."""
         try:
@@ -1198,4 +1203,4 @@ class CadGenerationService:
             provider = get_llm_provider(provider_name, api_key=api_key, base_url=base_url)
             return await provider.verify_credentials(model=effective_model)
         except Exception as e:
-            return False, f"Provider initialization failed: {str(e)}"
+            return False, f"Provider initialization failed: {e!s}"

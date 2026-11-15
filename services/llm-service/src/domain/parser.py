@@ -1,7 +1,8 @@
 """Parser and sanitizer for Replicad TypeScript CAD scripts."""
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 from src.api.schemas import MaterialType, ParameterDefinition, PartVisualSchema
 from src.domain.exceptions import SecurityViolationException
 from src.domain.models import ParsedCadModel
@@ -29,7 +30,7 @@ class ReplicadParser:
     ]
 
     @classmethod
-    def extract_code_and_explanation(cls, raw_text: str) -> Tuple[str, Optional[str]]:
+    def extract_code_and_explanation(cls, raw_text: str) -> tuple[str, str | None]:
         """Extracts TypeScript code block from LLM response, along with any surrounding commentary."""
         raw_text = raw_text.strip()
 
@@ -70,10 +71,10 @@ class ReplicadParser:
                 raise SecurityViolationException(f"Security violation: code contains forbidden pattern '{pattern}'")
 
     @classmethod
-    def extract_parameters(cls, code: str) -> Tuple[Dict[str, Any], List[ParameterDefinition]]:
+    def extract_parameters(cls, code: str) -> tuple[dict[str, Any], list[ParameterDefinition]]:
         """Extracts defaultParams object and infers UI slider boundaries."""
-        params_dict: Dict[str, Any] = {}
-        param_defs: List[ParameterDefinition] = []
+        params_dict: dict[str, Any] = {}
+        param_defs: list[ParameterDefinition] = []
 
         # Find export const defaultParams = { ... };
         match = re.search(r"(?:export\s+)?const\s+defaultParams\s*=\s*\{([^}]+)\}", code, re.DOTALL)
@@ -140,9 +141,9 @@ class ReplicadParser:
         return params_dict, param_defs
 
     @classmethod
-    def extract_parts_and_materials(cls, code: str) -> Tuple[List[PartVisualSchema], List[str], bool]:
+    def extract_parts_and_materials(cls, code: str) -> tuple[list[PartVisualSchema], list[str], bool]:
         """Extracts assembly parts with their colors, physical materials, and glass properties."""
-        parts: List[PartVisualSchema] = []
+        parts: list[PartVisualSchema] = []
         materials_set = set()
         has_glass = False
 

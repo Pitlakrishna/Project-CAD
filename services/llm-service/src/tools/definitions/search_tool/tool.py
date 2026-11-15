@@ -1,6 +1,7 @@
 """Specialized Search Engineering Specs Tool implementation."""
 
-from typing import Any, Dict, Optional
+from typing import Any
+
 from src.tools.base import BaseTool, ToolCallResult
 from src.tools.definitions.search_tool.prompt import SEARCH_TOOL_PROMPT
 from src.tools.definitions.search_tool.schema import SearchSpecsArgs
@@ -17,7 +18,7 @@ class SearchSpecsTool(BaseTool):
     prompt_guidelines = SEARCH_TOOL_PROMPT
     args_schema = SearchSpecsArgs
 
-    def execute(self, arguments: Optional[Dict[str, Any]] = None, **kwargs: Any) -> ToolCallResult:
+    def execute(self, arguments: dict[str, Any] | None = None, **kwargs: Any) -> ToolCallResult:
         """Validates arguments and creates the tool call result."""
         payload = arguments if arguments is not None else kwargs
         validated = SearchSpecsArgs.model_validate(payload)

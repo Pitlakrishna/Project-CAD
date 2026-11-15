@@ -99,25 +99,36 @@ export interface BlueprintMetrics {
 }
 
 /**
- * Extracts a professional engineering title from the user prompt or fallback.
+ * Extracts a concise, professional engineering title from the user prompt.
+ * Avoids long runaway paragraph titles by extracting the core subject noun phrase.
  */
 function extractTitleFromPrompt(prompt?: string): string {
   if (!prompt || typeof prompt !== "string") {
-    return "Precision CAD Model";
+    return "Precision 3D Model";
   }
-  const clean = prompt.trim()
-    .replace(/^[\s\W]*(?:please|can\s+you|make|create|generate|design|build|model|render|produce)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:3d\s+)?(?:printable\s+)?(?:parametric\s+)?(?:cad\s+)?(?:model\s+of\s+)?/i, "")
+  let clean = prompt.trim()
+    .replace(/^[\s\W]*(?:please\s+|can\s+you\s+|could\s+you\s+)?(?:make|create|generate|design|build|model|render|produce|draft|draw)\s+(?:me\s+)?(?:a\s+|an\s+|the\s+)?(?:hyper-detailed\s+|photorealistic\s+|detailed\s+|modern\s+|realistic\s+)?(?:3d\s+)?(?:product\s+render\s+of\s+a\s+|product\s+render\s+of\s+|render\s+of\s+a\s+|render\s+of\s+|printable\s+)?(?:parametric\s+)?(?:cad\s+)?(?:model\s+(?:of\s+)?|part\s+(?:of\s+)?|assembly\s+(?:of\s+)?)?/i, "")
     .replace(/^(?:stl|step|dxf|pdf)\s+(?:of\s+)?/i, "")
     .replace(/\s+(?:in|as|with)\s+(?:step|stl|dxf|pdf).*$/i, "")
-    .replace(/[.!?]+$/, "")
     .trim();
 
-  if (!clean || clean.length < 3) {
-    return "Precision CAD Model";
+  // Split on punctuation, newline, or clauses like "captured at", "featuring", "rendered in", "with"
+  const firstClause = clean.split(/[.\n;]|,\s*(?:captured|featuring|rendered|with|shot|created|illuminated|crafted|paired)\b/i)[0].trim();
+  let title = firstClause || clean;
+
+  // Enforce concise length limit (max 45 characters cleanly)
+  if (title.length > 45) {
+    const cut = title.slice(0, 42);
+    const lastSpace = cut.lastIndexOf(" ");
+    title = (lastSpace > 15 ? cut.slice(0, lastSpace) : cut).replace(/[\s,]+$/, "") + "...";
+  }
+
+  if (!title || title.length < 3) {
+    return "Precision 3D Model";
   }
 
   // Capitalize title
-  return clean.charAt(0).toUpperCase() + clean.slice(1);
+  return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
 /**

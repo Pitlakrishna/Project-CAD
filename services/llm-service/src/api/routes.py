@@ -2,6 +2,7 @@
 
 import json
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
@@ -113,7 +114,7 @@ async def generate_cad(
     except CodeParsingException as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Failed to parse valid Replicad TypeScript: {str(e)}",
+            detail=f"Failed to parse valid Replicad TypeScript: {e!s}",
         )
     except ProviderException as e:
         err_msg = format_route_error(e)
@@ -160,7 +161,7 @@ async def refine_cad(
     except CodeParsingException as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Failed to parse refined Replicad TypeScript: {str(e)}",
+            detail=f"Failed to parse refined Replicad TypeScript: {e!s}",
         )
     except ProviderException as e:
         err_msg = format_route_error(e)

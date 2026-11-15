@@ -70,11 +70,18 @@ export function ThoughtAccordion({ thoughts, isThinking }: ThoughtAccordionProps
           : "bg-[#151515] border-[#262626] hover:border-[#333333]"
       }`}
     >
-      {/* 1. Header Bar (Clickable) */}
-      <button
-        type="button"
+      {/* 1. Header Bar (Clickable container - div with button role to prevent nested button hydration error) */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-3.5 py-2 flex items-center justify-between text-left cursor-pointer transition-colors hover:bg-white/[0.02]"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setIsExpanded(!isExpanded);
+          }
+        }}
+        className="w-full px-3.5 py-2 flex items-center justify-between text-left cursor-pointer transition-colors hover:bg-white/[0.02] select-none"
       >
         <div className="flex items-center gap-2 min-w-0">
           <div
@@ -108,7 +115,7 @@ export function ThoughtAccordion({ thoughts, isThinking }: ThoughtAccordionProps
             <button
               type="button"
               onClick={handleCopy}
-              className="p-1 rounded text-[#737373] hover:text-[#e0e0e0] hover:bg-[#222] transition-colors"
+              className="p-1 rounded text-[#737373] hover:text-[#e0e0e0] hover:bg-[#222] transition-colors cursor-pointer"
               title="Copy thought process"
             >
               {copied ? (
@@ -127,7 +134,7 @@ export function ThoughtAccordion({ thoughts, isThinking }: ThoughtAccordionProps
             <IconChevronDown className="w-3.5 h-3.5" />
           </div>
         </div>
-      </button>
+      </div>
 
       {/* 2. Expanded Collapsible Body */}
       {isExpanded && (

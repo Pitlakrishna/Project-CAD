@@ -50,12 +50,70 @@ export default function ViewerPage() {
         setLoading(true);
         setError(null);
 
-        // Attempt 1: Fetch directly from server cache / internal proxy
+        // Attempt 1: If model is a procedural Three.js WebGL scene, resolve directly from local sessions (do not query CAD kernel)
         let data: CadSceneResponse | null = null;
-        try {
-          data = await fetchCadScene(modelId);
-        } catch (fetchErr) {
-          console.warn("[3D Studio] Direct scene fetch attempt failed:", fetchErr);
+        if (modelId.startsWith("threejs-")) {
+          const sessions = loadSessions();
+          let matchedThreejs: string | null = null;
+          let matchedPrompt: string | undefined = undefined;
+
+          // Search for specific model ID or recent Three.js scene
+          for (const session of sessions) {
+            for (const msg of session.messages) {
+              if (
+                msg.geometry?.modelId === modelId ||
+                msg.geometry?.modelId?.startsWith(modelId)
+              ) {
+                if (msg.cadResponse?.threejs_code || msg.geometry?.threejs_code) {
+                  matchedThreejs = msg.cadResponse?.threejs_code || msg.geometry?.threejs_code || null;
+                  matchedPrompt = msg.userPrompt;
+                  break;
+                }
+              }
+            }
+            if (matchedThreejs) break;
+          }
+
+          // Fallback: Check the most recent message with threejs code across sessions
+          if (!matchedThreejs) {
+            for (const session of sessions) {
+              for (const msg of [...session.messages].reverse()) {
+                if (msg.cadResponse?.threejs_code || msg.geometry?.threejs_code) {
+                  matchedThreejs = msg.cadResponse?.threejs_code || msg.geometry?.threejs_code || null;
+                  matchedPrompt = msg.userPrompt;
+                  break;
+                }
+              }
+              if (matchedThreejs) break;
+            }
+          }
+
+          data = {
+            status: "success",
+            modelId: modelId,
+            engine_mode: "threejs",
+            threejs_code:
+              matchedThreejs ||
+              "function buildScene(tools) { const { THREE, add, createPBRMaterial } = tools; const geo = new THREE.TorusKnotGeometry(25, 8, 120, 24); const mat = createPBRMaterial({ type: 'metal', color: '#0ea5e9', metalness: 0.8, roughness: 0.2 }); add(new THREE.Mesh(geo, mat)); }",
+            metrics: {
+              boundingBox: { min: [-50, 0, -50], max: [50, 25, 50], dimensions: { width: 100, depth: 100, height: 25 } },
+              volume: 0,
+              vertexCount: 15000,
+              triangleCount: 30000,
+            },
+            parts: [],
+            availableExports: ["stl"],
+          };
+          if (matchedPrompt && !isCancelled) {
+            setUserPrompt(matchedPrompt);
+          }
+        } else {
+          // Attempt 2: CAD solid geometry — fetch directly from server cache / internal proxy
+          try {
+            data = await fetchCadScene(modelId);
+          } catch (fetchErr) {
+            console.warn("[3D Studio] Direct scene fetch attempt failed:", fetchErr);
+          }
         }
 
         // Attempt 2: If scene not found in server cache, auto-recover from local chat history

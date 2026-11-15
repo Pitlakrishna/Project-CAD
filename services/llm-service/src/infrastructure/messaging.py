@@ -5,8 +5,9 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+
 import pika  # type: ignore
+
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -17,11 +18,11 @@ class EventPublisher:
 
     def __init__(self):
         self.enabled = settings.rabbitmq_enabled
-        self._connection: Optional[pika.BlockingConnection] = None
-        self._channel: Optional[pika.adapters.blocking_connection.BlockingChannel] = None
+        self._connection: pika.BlockingConnection | None = None
+        self._channel: pika.adapters.blocking_connection.BlockingChannel | None = None
         self._lock = threading.Lock()
 
-    def _get_channel(self) -> Optional[pika.adapters.blocking_connection.BlockingChannel]:
+    def _get_channel(self) -> pika.adapters.blocking_connection.BlockingChannel | None:
         """Returns a valid open channel, reconnecting if disconnected."""
         if not self.enabled:
             return None
@@ -78,7 +79,7 @@ class EventPublisher:
         user_id: str,
         code_snippet: str,
         token_usage: int,
-        tenant_id: Optional[str] = None,
+        tenant_id: str | None = None,
     ) -> bool:
         if not self.enabled:
             return False

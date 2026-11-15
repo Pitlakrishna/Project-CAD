@@ -13,35 +13,31 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import (
     Any,
-    Awaitable,
-    Callable,
-    Dict,
-    List,
     NoReturn,
-    Optional,
     TypeVar,
 )
 
+from src.core.models import get_models_to_try, is_retryable_model_error
 from src.domain.exceptions import ProviderException
 from src.domain.models import LlmGenerationResult
-from src.core.models import get_models_to_try, is_retryable_model_error
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
 
-def validate_api_key(provider_name: str, api_key: Optional[str]) -> None:
+def validate_api_key(provider_name: str, api_key: str | None) -> None:
     """Verifies that an API key is provided, raising ProviderException if missing."""
     if not api_key:
         raise ProviderException(f"{provider_name.capitalize()} API key is not configured.")
 
 
-def format_chat_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+def format_chat_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     """Standardizes list of role/content message dicts into typed chat completion format."""
-    formatted: List[Dict[str, str]] = []
+    formatted: list[dict[str, str]] = []
     for m in messages:
         role = m.get("role", "")
         content = m.get("content", "")
@@ -54,10 +50,10 @@ def format_chat_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]
     return formatted
 
 
-def extract_system_and_messages(messages: List[Dict[str, str]]) -> tuple[str, List[Dict[str, str]]]:
+def extract_system_and_messages(messages: list[dict[str, str]]) -> tuple[str, list[dict[str, str]]]:
     """Extracts system instructions string and remaining conversational turns."""
-    system_parts: List[str] = []
-    chat_messages: List[Dict[str, str]] = []
+    system_parts: list[str] = []
+    chat_messages: list[dict[str, str]] = []
 
     for m in messages:
         role = m.get("role", "")
@@ -82,10 +78,10 @@ class StreamThoughtExtractor:
     def __init__(self) -> None:
         self.in_thought = False
 
-    def feed(self, chunk: str) -> List[tuple[str, str]]:
+    def feed(self, chunk: str) -> list[tuple[str, str]]:
         if not chunk:
             return []
-        events: List[tuple[str, str]] = []
+        events: list[tuple[str, str]] = []
         text = chunk
         while text:
             if not self.in_thought:
@@ -116,7 +112,7 @@ def create_generation_result(
     provider: str,
     model: str,
     start_time: float,
-    token_usage: Optional[int] = None,
+    token_usage: int | None = None,
     raw_thoughts: str = "",
 ) -> LlmGenerationResult:
     """Constructs a typed LlmGenerationResult with elapsed latency in milliseconds."""
@@ -136,9 +132,9 @@ def create_stream_final_payload(
     raw_response: str,
     model: str,
     start_time: float,
-    token_usage: Optional[int] = None,
+    token_usage: int | None = None,
     raw_thoughts: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Constructs the standard final_payload dictionary for SSE streaming."""
     latency = (time.perf_counter() - start_time) * 1000
     tokens = token_usage if token_usage is not None else len(raw_response.split())
@@ -154,7 +150,7 @@ def create_stream_final_payload(
 
 def handle_provider_error(
     provider_name: str,
-    error: Optional[Exception],
+    error: Exception | None,
     action: str = "generation",
 ) -> NoReturn:
     """Translates provider exceptions, raising user-friendly rate limit or timeout error if applicable."""
@@ -239,7 +235,7 @@ def handle_provider_error(
 
 async def execute_with_model_fallback(
     provider_name: str,
-    requested_model: Optional[str],
+    requested_model: str | None,
     is_cad_task: bool,
     call_fn: Callable[[str], Awaitable[T]],
 ) -> tuple[T, str]:
@@ -253,7 +249,7 @@ async def execute_with_model_fallback(
         requested_model=requested_model,
         is_cad_task=is_cad_task,
     )
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
 
     for current_model in models_to_try:
         try:

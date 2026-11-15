@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, cast
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Any, cast
 
 from src.config import settings
-from src.domain.models import LlmGenerationResult
 from src.core.base import BaseLlmProvider
 from src.core.common import (
     StreamThoughtExtractor,
@@ -16,6 +16,7 @@ from src.core.common import (
     validate_api_key,
 )
 from src.core.models import get_models_to_try, is_retryable_model_error
+from src.domain.models import LlmGenerationResult
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -28,10 +29,10 @@ class GroqProvider(BaseLlmProvider):
 
     DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
 
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, base_url: str | None = None):
         self.api_key = api_key or settings.groq_api_key
         self.base_url = base_url or settings.groq_base_url or self.DEFAULT_BASE_URL
-        self._client: Optional[AsyncOpenAI] = None
+        self._client: AsyncOpenAI | None = None
         if self.api_key:
             from openai import AsyncOpenAI
             self._client = AsyncOpenAI(
@@ -41,7 +42,7 @@ class GroqProvider(BaseLlmProvider):
             )
 
     @staticmethod
-    def _format_groq_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _format_groq_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
         """Formats messages for Groq API, appending a text-only directive to prevent
         Llama 3 / open-weights models from emitting native tool tokens that cause Groq 400 errors.
         """
@@ -85,9 +86,9 @@ class GroqProvider(BaseLlmProvider):
         chat_families = ("llama", "qwen", "deepseek", "gemma", "mixtral", "mistral", "gpt")
         return any(fam in mid for fam in chat_families)
 
-    _cached_models: Optional[tuple[float, List[str]]] = None
+    _cached_models: tuple[float, list[str]] | None = None
 
-    async def get_available_models(self) -> List[str]:
+    async def get_available_models(self) -> list[str]:
         """Dynamically queries Groq API for active text/chat models available on this API key."""
         if not self._client:
             return []
@@ -111,8 +112,8 @@ class GroqProvider(BaseLlmProvider):
         return []
 
     async def resolve_models_to_try(
-        self, requested_model: Optional[str] = None, is_cad_task: bool = True
-    ) -> List[str]:
+        self, requested_model: str | None = None, is_cad_task: bool = True
+    ) -> list[str]:
         """Dynamically builds candidate list from live Groq catalog, eliminating hardcoded model 404 errors."""
         configured = get_models_to_try("groq", requested_model=requested_model, is_cad_task=is_cad_task)
         available = await self.get_available_models()
@@ -120,7 +121,7 @@ class GroqProvider(BaseLlmProvider):
             return configured
 
         req = (requested_model or "").strip()
-        candidates: List[str] = []
+        candidates: list[str] = []
 
         # 1. If requested model is in available models and is a chat model, place it first
         if req and req.lower() not in ("auto", "default") and req in available:
@@ -151,8 +152,8 @@ class GroqProvider(BaseLlmProvider):
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
         **kwargs: Any,
@@ -213,17 +214,17 @@ class GroqProvider(BaseLlmProvider):
 
     async def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
         **kwargs: Any,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         validate_api_key("groq", self.api_key)
         start_time = time.perf_counter()
         openai_messages = self._format_groq_messages(messages)
         models_to_try = await self.resolve_models_to_try(requested_model=model, is_cad_task=is_cad_task)
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for current_model in models_to_try:
             yielded_any = False
@@ -241,8 +242,8 @@ class GroqProvider(BaseLlmProvider):
                     stream=True,
                 )
 
-                accumulated_tokens: List[str] = []
-                accumulated_thoughts: List[str] = []
+                accumulated_tokens: list[str] = []
+                accumulated_thoughts: list[str] = []
                 thought_extractor = StreamThoughtExtractor()
 
                 async for chunk in stream:
@@ -287,7 +288,7 @@ class GroqProvider(BaseLlmProvider):
     async def is_available(self) -> bool:
         return bool(self.api_key)
 
-    async def verify_credentials(self, model: Optional[str] = None) -> tuple[bool, str]:
+    async def verify_credentials(self, model: str | None = None) -> tuple[bool, str]:
         if not self.api_key or not self._client:
             return False, "Groq API key is missing. Please provide an API key in settings or set GROQ_API_KEY."
         target_model = model or settings.groq_model
@@ -295,4 +296,4 @@ class GroqProvider(BaseLlmProvider):
             await self._client.models.list()
             return True, f"Groq credentials verified successfully (model target: {target_model})."
         except Exception as e:
-            return False, f"Groq authentication/connection failed: {str(e)}"
+            return False, f"Groq authentication/connection failed: {e!s}"

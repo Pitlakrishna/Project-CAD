@@ -15,7 +15,7 @@ import {
   getConcreteNormalTexture,
   getWoodGrainNormalTexture,
 } from "../lib/proceduralTextures";
-import { executeThreeSceneScript } from "../lib/threeSceneRunner";
+import { executeThreeSceneScript, disposeHierarchy } from "../lib/threeSceneRunner";
 
 export type NavigationMode = "orbit" | "walkthrough";
 export type LightingPreset = "studio" | "daylight" | "sunset" | "night";
@@ -303,12 +303,30 @@ export function StudioViewer3D({ sceneData, userPrompt, onBackToChat }: StudioVi
       if (threeRef.current?.reqId) {
         cancelAnimationFrame(threeRef.current.reqId);
       }
+      if (threeRef.current?.threeSceneCleanup) {
+        threeRef.current.threeSceneCleanup();
+        threeRef.current.threeSceneCleanup = null;
+        threeRef.current.threeSceneAnimate = null;
+      }
+      if (threeRef.current?.partsGroup) {
+        disposeHierarchy(threeRef.current.partsGroup);
+      }
+      if (threeRef.current?.groundMesh) {
+        disposeHierarchy(threeRef.current.groundMesh);
+      }
+      if (threeRef.current?.contactShadow) {
+        disposeHierarchy(threeRef.current.contactShadow);
+      }
+      if (threeRef.current?.gridHelper) {
+        threeRef.current.gridHelper.geometry.dispose();
+      }
       pmremGenerator.dispose();
       envTexture.dispose();
       shadowTex.dispose();
       shadowGeo.dispose();
       shadowMat.dispose();
       renderer.dispose();
+      renderer.forceContextLoss();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
@@ -385,26 +403,10 @@ export function StudioViewer3D({ sceneData, userPrompt, onBackToChat }: StudioVi
 
     if (!sceneData.parts || sceneData.parts.length === 0) return;
 
-    // Clear existing parts and dispose nested geometries/edges
+    // Clear existing parts and dispose all nested geometries, textures, and materials
     while (partsGroup.children.length > 0) {
-      const child = partsGroup.children[0] as THREE.Mesh;
-      if (child.geometry) child.geometry.dispose();
-      if (Array.isArray(child.material)) {
-        child.material.forEach((m) => m.dispose());
-      } else if (child.material) {
-        child.material.dispose();
-      }
-      child.traverse((nested) => {
-        if ((nested as THREE.LineSegments).isLineSegments) {
-          const lines = nested as THREE.LineSegments;
-          if (lines.geometry) lines.geometry.dispose();
-          if (Array.isArray(lines.material)) {
-            lines.material.forEach((m) => m.dispose());
-          } else if (lines.material) {
-            lines.material.dispose();
-          }
-        }
-      });
+      const child = partsGroup.children[0];
+      disposeHierarchy(child);
       partsGroup.remove(child);
     }
 

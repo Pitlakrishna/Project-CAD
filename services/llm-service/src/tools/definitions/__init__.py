@@ -18,11 +18,11 @@ ALL_TOOLS = [
 
 __all__ = [
     "ALL_TOOLS",
-    "WordDocumentTool",
-    "ExcelSheetTool",
-    "PresentationTool",
-    "PdfReportTool",
     "CsvExportTool",
+    "ExcelSheetTool",
+    "PdfReportTool",
+    "PresentationTool",
     "SearchSpecsTool",
+    "WordDocumentTool",
 ]
 

@@ -231,6 +231,166 @@ export interface ThreeSceneExecutionResult {
   bounds: THREE.Box3;
 }
 
+export function disposeHierarchy(obj: THREE.Object3D): void {
+  obj.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      if (mesh.geometry) {
+        mesh.geometry.dispose();
+      }
+      if (mesh.material) {
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        materials.forEach((mat) => {
+          Object.keys(mat).forEach((key) => {
+            const val = (mat as any)[key];
+            if (val && typeof val.dispose === "function" && val.isTexture) {
+              val.dispose();
+            }
+          });
+          mat.dispose();
+        });
+      }
+    }
+  });
+}
+
+/**
+ * Builds a deterministic, visually rich procedural 3D fallback environment
+ * when an AI-generated scene script contains fatal syntax or runtime errors.
+ * Ensures the WebGL viewport NEVER goes blank or crashes.
+ */
+function buildDeterministicFallback(
+  targetGroup: THREE.Group,
+  tools: Record<string, any>
+): void {
+  const { THREE, add, createPBRMaterial } = tools;
+
+  // 1. Sleek architectural pedestal base
+  const baseGeo = new THREE.CylinderGeometry(40, 45, 6, 32);
+  const baseMat = createPBRMaterial({
+    type: "concrete",
+    color: "#1e293b",
+    roughness: 0.6,
+    metalness: 0.2,
+  });
+  const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+  baseMesh.position.y = 3;
+  add(baseMesh);
+
+  // 2. Inner metallic platform ring
+  const ringGeo = new THREE.CylinderGeometry(35, 35, 2, 32);
+  const ringMat = createPBRMaterial({
+    type: "metal",
+    color: "#38bdf8",
+    roughness: 0.2,
+    metalness: 0.8,
+  });
+  const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+  ringMesh.position.y = 7;
+  add(ringMesh);
+
+  // 3. Central floating showcase faceted gem/crystal
+  const crystalGeo = new THREE.OctahedronGeometry(18, 0);
+  const crystalMat = createPBRMaterial({
+    type: "glass",
+    color: "#0ea5e9",
+    roughness: 0.1,
+    transmission: 0.9,
+    transparent: true,
+    opacity: 0.8,
+  });
+  const crystalMesh = new THREE.Mesh(crystalGeo, crystalMat);
+  crystalMesh.position.y = 28;
+  add(crystalMesh);
+
+  // 4. Elegant wireframe outer cage
+  const wireGeo = new THREE.IcosahedronGeometry(22, 1);
+  const wireMat = new THREE.MeshBasicMaterial({
+    color: "#38bdf8",
+    wireframe: true,
+    transparent: true,
+    opacity: 0.35,
+  });
+  const wireMesh = new THREE.Mesh(wireGeo, wireMat);
+  wireMesh.position.y = 28;
+  add(wireMesh);
+
+  // 5. Subtle idle floating animation
+  tools.onAnimate?.((time: number) => {
+    crystalMesh.rotation.y = time * 0.4;
+    crystalMesh.rotation.x = Math.sin(time * 0.6) * 0.15;
+    wireMesh.rotation.y = -time * 0.2;
+    crystalMesh.position.y = 28 + Math.sin(time * 1.5) * 2;
+    wireMesh.position.y = 28 + Math.sin(time * 1.5) * 2;
+  });
+}
+
+/**
+ * Deep sanitization of AI-generated Three.js scene code:
+ * - Strips zero-width and non-breaking Unicode spaces
+ * - Decodes HTML entities and normalizes smart quotes
+ * - Extracts code blocks and strips markdown fences
+ * - Strips conversational preamble before `function buildScene`
+ * - Strips ES module `import` and `export` statements
+ */
+export function sanitizeThreeSceneCode(raw: string): string {
+  let code = (raw || "").trim();
+
+  // 1. Strip BOM and invisible zero-width or non-breaking spaces
+  code = code
+    .replace(/\uFEFF/g, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00A0/g, " ");
+
+  // 2. Decode common HTML entities that LLMs may emit
+  code = code
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+  // 3. Normalize smart quotes to standard ASCII quotes
+  code = code
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'");
+
+  // 4. Extract code from markdown fences if present
+  const blockWithFn = code.match(
+    /```(?:javascript|js|typescript|ts)?\s*([\s\S]*?(?:function\s+buildScene|const\s+buildScene|let\s+buildScene|var\s+buildScene|function\s+main)[\s\S]*?)```/i
+  );
+  if (blockWithFn && blockWithFn[1]) {
+    code = blockWithFn[1].trim();
+  } else {
+    const genericBlock = code.match(/```(?:javascript|js|typescript|ts)?\s*([\s\S]*?)```/i);
+    if (genericBlock && genericBlock[1]) {
+      code = genericBlock[1].trim();
+    } else {
+      code = code.replace(/^```[a-zA-Z]*\s*/gm, "").replace(/```\s*$/gm, "").trim();
+    }
+  }
+
+  // 5. If there is conversational text before function buildScene, strip it
+  const fnIndex = code.search(
+    /\b(?:function\s+buildScene|const\s+buildScene|let\s+buildScene|var\s+buildScene|function\s+main)\b/
+  );
+  if (fnIndex > 0) {
+    code = code.slice(fnIndex).trim();
+  }
+
+  // 6. Strip ES module imports and exports so new Function doesn't throw SyntaxError
+  code = code
+    .replace(/^[\t ]*import\s+[\s\S]*?from\s+['"][^'"]+['"];?[\t ]*$/gm, "")
+    .replace(/^[\t ]*import\s+['"][^'"]+['"];?[\t ]*$/gm, "")
+    .replace(/^[\t ]*export\s+default\s+/gm, "")
+    .replace(/^[\t ]*export\s+/gm, "");
+
+  // 7. Strip trailing backticks or unmatched fences
+  code = code.replace(/```+/g, "").trim();
+
+  return code;
+}
+
 /**
  * Executes a procedural Three.js scene script inside a controlled environment
  */
@@ -241,16 +401,13 @@ export function executeThreeSceneScript(
   controls: OrbitControls,
   extraContext: Record<string, any> = {}
 ): ThreeSceneExecutionResult {
-  // 1. Sanitize script: strip markdown fences
-  let cleanCode = scriptContent.trim();
-  const mdMatch = cleanCode.match(/```(?:javascript|js|typescript|ts)?\s*([\s\S]*?)```/);
-  if (mdMatch) {
-    cleanCode = mdMatch[1].trim();
-  }
+  // 1. Sanitize script
+  const cleanCode = sanitizeThreeSceneCode(scriptContent);
 
-  // Ensure target group is clear
+  // Ensure target group is clear and previous GPU resources are cleanly disposed
   while (targetGroup.children.length > 0) {
     const child = targetGroup.children[0];
+    disposeHierarchy(child);
     targetGroup.remove(child);
   }
 
@@ -284,42 +441,40 @@ export function executeThreeSceneScript(
     ...extraContext,
   };
 
-  // 2. Wrap and execute the user function safely
+  // 2. Wrap and execute the user function safely with scoped variable availability
   try {
-    const wrappedScript = `
-      ${cleanCode}
-      if (typeof buildScene === "function") {
-        buildScene(tools);
-      } else if (typeof main === "function") {
-        main(tools);
-      }
-    `;
+    const wrappedScript =
+      '"use strict";\n' +
+      "const { THREE, scene, camera, controls, add, noise2D, rawPerlin2D, createPBRMaterial, onAnimate } = tools;\n" +
+      cleanCode +
+      '\nif (typeof buildScene === "function") {\n' +
+      "  buildScene(tools);\n" +
+      '} else if (typeof main === "function") {\n' +
+      "  main(tools);\n" +
+      "}";
+
     const runner = new Function("tools", wrappedScript);
     runner(tools);
   } catch (err) {
-    console.error("[ThreeSceneRunner] Scene script execution error:", err);
-    throw err;
+    console.error("[ThreeSceneRunner] Scene script execution error, deploying deterministic fallback:", err);
+    buildDeterministicFallback(targetGroup, tools);
   }
 
-  // 3. Compute overall bounding box
+  // 3. If the script did not add any objects or was empty, deploy deterministic fallback
+  if (targetGroup.children.length === 0) {
+    console.warn("[ThreeSceneRunner] Target group has 0 children after execution, deploying fallback.");
+    buildDeterministicFallback(targetGroup, tools);
+  }
+
+  // 4. Compute overall bounding box
   const bounds = new THREE.Box3().setFromObject(targetGroup);
 
-  // 4. Return lifecycle handlers
+  // 5. Return lifecycle handlers with complete GPU memory reclamation
   const cleanup = () => {
     animateCallbacks.length = 0;
     createdObjects.forEach((obj) => {
       targetGroup.remove(obj);
-      obj.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) {
-          const m = child as THREE.Mesh;
-          if (m.geometry) m.geometry.dispose();
-          if (Array.isArray(m.material)) {
-            m.material.forEach((mat) => mat.dispose());
-          } else if (m.material) {
-            m.material.dispose();
-          }
-        }
-      });
+      disposeHierarchy(obj);
     });
     createdObjects.length = 0;
   };

@@ -154,31 +154,54 @@ export default function Home() {
 
   function isCadModificationIntent(prompt: string): boolean {
     const text = prompt.toLowerCase().trim();
+    if (!text) return false;
 
-    // 1. Explicit non-modification conversational, question & advice patterns (DO NOT burn CAD tokens)
-    const nonModPatterns = [
-      /^(?:hi|hello|hey|greetings|hola|good morning|good afternoon|good evening)\b/i,
-      /^(?:thanks|thank you|thx|ok|okay|cool|great|awesome|good job|nice|bye|goodbye)\b/i,
-      /^(?:what|which|who|where|when|why|how|can you|could you|explain|tell me|is it|does it|should i)\b/i,
-      /\b(?:how to slice|print settings|bed temperature|nozzle temp|infill|warping|slice|troubleshoot|advice|tips)\b/i,
-    ];
-
-    if (nonModPatterns.some((pattern) => pattern.test(text))) {
+    // 1. Pure conversational greetings, thank-yous, and praise (DO NOT trigger CAD modification)
+    const pureChitChat =
+      /^(?:hi|hello|hey|greetings|hola|good\s+(?:morning|afternoon|evening)|thanks|thank\s+you|thx|cool|awesome|great|good\s+job|nice|ok|okay|bye|goodbye)[!.?]*$/i;
+    if (pureChitChat.test(text)) {
       return false;
     }
 
-    // 2. Strict CAD modification directives (Imperatives to edit the 3D model)
+    // 2. Pure slicing or 3D printing software advice questions (e.g. "what infill should I use?")
+    if (
+      /\b(?:how\s+to\s+slice|slicing\s+settings|infill\s+percentage|bed\s+temperature|nozzle\s+temp(?:erature)?|warping\s+issue|first\s+layer\s+height|supports?\s+setting)\b/i.test(
+        text
+      )
+    ) {
+      return false;
+    }
+
+    // 3. Strict CAD & 3D modification imperatives and directives (handles "can you", "please", "how about", and direct commands)
     const modifyDirectives = [
-      /\b(?:modify|resize|scale|enlarge|shrink)\b/i,
-      /\bmake\s+(?:it|the\s+[\w\s]{1,25})\s+(?:wider|thicker|taller|bigger|smaller|longer|narrower|shorter)\b/i,
-      /\b(?:increase|decrease|reduce)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|size|depth)\b/i,
-      /\badd\s+(?:\d+\s+)?(?:[\w\s]{1,20}\s+)?(?:mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?)\b/i,
-      /\b(?:fillet|chamfer|round|bevel)\s+(?:the\s+)?(?:[\w\s]{1,20}\s+)?(?:edges?|corners?)\b/i,
-      /\bchange\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|color|material|dimension)\b/i,
-      /\bset\s+(?:the\s+)?\w+\s+to\s+\d+\b/i,
+      /\b(?:modify|edit|update|adjust|alter|tweak|revise|re-?engineer)\b/i,
+      /\b(?:resize|scale|enlarge|shrink|stretch|compress|expand)\b/i,
+      /\b(?:make|render|turn)\s+(?:it|this|the\s+[\w\s]{1,30})\s+(?:wider|thicker|taller|bigger|smaller|longer|narrower|shorter|deeper|flatter|higher|lower|larger|slimmer|round(?:er)?|square|hollow|solid)\b/i,
+      /\b(?:increase|decrease|reduce|double|halve|cut|boost|raise|lower)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|size|depth|clearance|tolerance|spacing|count|number|angle|dimension|scale|elevation)\b/i,
+      /\badd\s+(?:\d+\s+)?(?:[\w\s]{1,25}\s+)?(?:mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?|threads?|handles?|tabs?|flanges?|bevels?|trees?|lakes?|rivers?|mountains?|buildings?|rooms?|walls?|windows?|doors?)\b/i,
+      /\b(?:remove|delete|eliminate|take\s+away|cut\s+out)\s+(?:the\s+)?(?:[\w\s]{1,30})\b/i,
+      /\b(?:fillet|chamfer|round|bevel|hollow|pocket|extrude|revolve|cut|draft)\b/i,
+      /\b(?:change|set|switch|replace|swap)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|color|material|finish|texture|appearance|dimension|shape|size)\b/i,
+      /\b(?:color|paint|make)\s+(?:it|the\s+[\w\s]{1,20})\s+(?:red|blue|green|yellow|black|white|grey|gray|orange|purple|gold|silver|bronze|copper|chrome|metallic|transparent|opaque|glass)\b/i,
+      /\b(?:material|make\s+it\s+out\s+of)\s+(?:metal|aluminum|steel|brass|wood|plastic|resin|glass|concrete|stone|pla|abs|petg|nylon)\b/i,
+      /\b(?:set|make)\s+(?:the\s+)?\w+\s+(?:to|=)\s+\d+/i,
+      /\b(?:more|fewer|less)\s+(?:trees?|hills?|valleys?|foliage|mountains?|detail|segments?|facets?)\b/i,
+      /\b(?:taller|shorter|wider|thicker|narrower|longer|bigger|smaller|flatter|higher|lower)\b/i,
     ];
 
-    return modifyDirectives.some((pat) => pat.test(text));
+    if (modifyDirectives.some((pat) => pat.test(text))) {
+      return true;
+    }
+
+    // 4. Pure informational questions without modification intent ("what is...", "why did...")
+    if (/^(?:what|which|who|where|when|why)\s+(?:is|are|was|were|do|does|did)\b/i.test(text)) {
+      return false;
+    }
+
+    // 5. In an active design session with prior CAD models, any prompt containing action verbs is a refinement
+    return /\b(?:add|remove|change|give|put|create|place|move|rotate|shift|extend|shorten|raise|lower|color|hollow|split|join)\b/i.test(
+      text
+    );
   }
 
   const CAD_DESIGN_TARGETS_REGEX =
@@ -493,17 +516,29 @@ export default function Home() {
     try {
       let cadResult: CadGenerationResponse;
 
-      // Commercial Multi-Turn Context: Window of recent dialogue turns (ensuring artifact responses are preserved)
+      // Commercial Multi-Turn Context: Window of recent dialogue turns (ensuring full chat & 3D context is preserved)
       const conversationHistory: ChatHistoryMessage[] = activeSession.messages
-        .filter((m) => !m.error && (m.content || (m.artifacts && m.artifacts.length > 0) || m.cadResponse?.replicad_code))
-        .slice(-8)
+        .filter((m) => !m.error && (m.content || (m.artifacts && m.artifacts.length > 0) || m.cadResponse?.replicad_code || m.cadResponse?.threejs_code))
+        .slice(-10)
         .map((m) => {
           let text = m.content || "";
           if (!text && m.role === "assistant") {
-            if (m.artifacts && m.artifacts.length > 0) {
-              text = `Generated document artifact(s): ${m.artifacts.map((a) => a.title || a.filename).join(", ")}.`;
+            if (m.cadResponse?.raw_explanation) {
+              text = m.cadResponse.raw_explanation;
+            } else if (m.cadResponse?.threejs_code) {
+              text = "Generated procedural Three.js WebGL 3D scene.";
             } else if (m.cadResponse?.replicad_code) {
-              text = "Generated 3D CAD model.";
+              const paramsSummary =
+                m.cadResponse.parameters && Object.keys(m.cadResponse.parameters).length > 0
+                  ? ` with parameters: ${JSON.stringify(m.cadResponse.parameters)}`
+                  : "";
+              const partsSummary =
+                m.cadResponse.parts && m.cadResponse.parts.length > 0
+                  ? ` containing parts: ${m.cadResponse.parts.map((p) => p.name).join(", ")}`
+                  : "";
+              text = `Generated 3D CAD model${paramsSummary}${partsSummary}.`;
+            } else if (m.artifacts && m.artifacts.length > 0) {
+              text = `Generated document artifact(s): ${m.artifacts.map((a) => a.title || a.filename).join(", ")}.`;
             }
           }
           return {
@@ -836,17 +871,29 @@ export default function Home() {
     try {
       let cadResult: CadGenerationResponse;
 
-      // Commercial Multi-Turn Context: Window of prior dialogue turns
+      // Commercial Multi-Turn Context: Window of prior dialogue turns (ensuring full chat & 3D context is preserved)
       const conversationHistory: ChatHistoryMessage[] = messagesBefore
-        .filter((m) => !m.error && (m.content || (m.artifacts && m.artifacts.length > 0) || m.cadResponse?.replicad_code))
-        .slice(-8)
+        .filter((m) => !m.error && (m.content || (m.artifacts && m.artifacts.length > 0) || m.cadResponse?.replicad_code || m.cadResponse?.threejs_code))
+        .slice(-10)
         .map((m) => {
           let text = m.content || "";
           if (!text && m.role === "assistant") {
-            if (m.artifacts && m.artifacts.length > 0) {
-              text = `Generated document artifact(s): ${m.artifacts.map((a) => a.title || a.filename).join(", ")}.`;
+            if (m.cadResponse?.raw_explanation) {
+              text = m.cadResponse.raw_explanation;
+            } else if (m.cadResponse?.threejs_code) {
+              text = "Generated procedural Three.js WebGL 3D scene.";
             } else if (m.cadResponse?.replicad_code) {
-              text = "Generated 3D CAD model.";
+              const paramsSummary =
+                m.cadResponse.parameters && Object.keys(m.cadResponse.parameters).length > 0
+                  ? ` with parameters: ${JSON.stringify(m.cadResponse.parameters)}`
+                  : "";
+              const partsSummary =
+                m.cadResponse.parts && m.cadResponse.parts.length > 0
+                  ? ` containing parts: ${m.cadResponse.parts.map((p) => p.name).join(", ")}`
+                  : "";
+              text = `Generated 3D CAD model${paramsSummary}${partsSummary}.`;
+            } else if (m.artifacts && m.artifacts.length > 0) {
+              text = `Generated document artifact(s): ${m.artifacts.map((a) => a.title || a.filename).join(", ")}.`;
             }
           }
           return {

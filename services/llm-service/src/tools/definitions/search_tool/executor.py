@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 import httpx
 
 logger = logging.getLogger(__name__)
 
 # Standard engineering dimensional database for rapid retrieval and offline resilience
-STANDARD_SPECS_DATABASE: Dict[str, Dict[str, Any]] = {
+STANDARD_SPECS_DATABASE: dict[str, dict[str, Any]] = {
     "laptop": {
         "title": "Standard 15.6-Inch Laptop Physical Dimensions",
         "envelope_mm": {"width": 360.0, "depth": 240.0, "thickness": 18.0},
@@ -120,7 +121,7 @@ STANDARD_SPECS_DATABASE: Dict[str, Dict[str, Any]] = {
     },
 }
 
-STANDARD_MATERIALS_DATABASE: Dict[str, Dict[str, Any]] = {
+STANDARD_MATERIALS_DATABASE: dict[str, dict[str, Any]] = {
     "inconel 718": {
         "name": "Inconel 718 Nickel Superalloy",
         "category": "metal",
@@ -164,7 +165,7 @@ class EngineeringSpecSearchExecutor:
     """Performs live web/Google search with fallback to standard engineering spec repository."""
 
     @classmethod
-    async def search(cls, query: str, target_component: Optional[str] = None) -> Dict[str, Any]:
+    async def search(cls, query: str, target_component: str | None = None) -> dict[str, Any]:
         """Searches for real-world engineering specifications and standard dimensions."""
         clean_query = query.strip()
         matched_db_key = None
@@ -190,7 +191,7 @@ class EngineeringSpecSearchExecutor:
                 break
 
         # 2. Attempt live web search if external connectivity is available
-        live_snippets: List[str] = []
+        live_snippets: list[str] = []
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
                 # Query DuckDuckGo instant API for real-world engineering parameters

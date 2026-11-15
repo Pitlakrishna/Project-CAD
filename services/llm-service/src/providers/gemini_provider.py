@@ -5,17 +5,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from src.config import settings
-from src.domain.models import LlmGenerationResult
 from src.core.base import BaseLlmProvider
 from src.core.common import handle_provider_error, validate_api_key
 from src.core.models import (
     GEMINI_BANNED_MODELS,
+)
+from src.core.models import (
     get_models_to_try as centralized_get_models_to_try,
+)
+from src.core.models import (
     sanitize_model as centralized_sanitize_model,
 )
+from src.domain.models import LlmGenerationResult
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +31,7 @@ class GeminiProvider(BaseLlmProvider):
     DEFAULT_MODEL = "gemini-2.5-flash"
     BANNED_MODELS = GEMINI_BANNED_MODELS
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or getattr(settings, "gemini_api_key", None)
         self._client = None
         if self.api_key:
@@ -41,11 +46,11 @@ class GeminiProvider(BaseLlmProvider):
             except Exception as e:
                 logger.warning("Could not initialize Gemini client: %s", e)
 
-    def _prepare_payload(self, messages: List[Dict[str, str]]):
+    def _prepare_payload(self, messages: list[dict[str, str]]):
         from google.genai import types
 
-        system_parts: List[str] = []
-        user_or_model_contents: List[tuple[str, str]] = []
+        system_parts: list[str] = []
+        user_or_model_contents: list[tuple[str, str]] = []
 
         for m in messages:
             role = m.get("role", "user")
@@ -57,7 +62,7 @@ class GeminiProvider(BaseLlmProvider):
 
         system_instruction = "\n\n".join(system_parts) if system_parts else None
 
-        formatted_contents: List[types.Content] = []
+        formatted_contents: list[types.Content] = []
         for role, content in user_or_model_contents:
             clean_text = content.strip() if content else ""
             if not clean_text:
@@ -119,12 +124,12 @@ class GeminiProvider(BaseLlmProvider):
             return None
 
     @classmethod
-    def _build_tools_config(cls, enable_search: bool = False) -> Optional[List[Any]]:
+    def _build_tools_config(cls, enable_search: bool = False) -> list[Any] | None:
         """Search grounding is disabled to prevent 429 quota exhaustion on Gemini API keys."""
         return None
 
     @classmethod
-    def _extract_grounding_metadata(cls, cand: Any) -> Optional[Dict[str, Any]]:
+    def _extract_grounding_metadata(cls, cand: Any) -> dict[str, Any] | None:
         """Extracts Google Search queries and cited web sources from a candidate."""
         try:
             gm = getattr(cand, "grounding_metadata", None)
@@ -133,7 +138,7 @@ class GeminiProvider(BaseLlmProvider):
 
             queries = getattr(gm, "web_search_queries", None) or []
             chunks = getattr(gm, "grounding_chunks", None) or []
-            sources: List[Dict[str, str]] = []
+            sources: list[dict[str, str]] = []
             for chunk in chunks:
                 web = getattr(chunk, "web", None)
                 if web:
@@ -151,24 +156,24 @@ class GeminiProvider(BaseLlmProvider):
             return None
 
     @classmethod
-    def sanitize_model(cls, requested_model: Optional[str], is_cad_task: bool = False) -> str:
+    def sanitize_model(cls, requested_model: str | None, is_cad_task: bool = False) -> str:
         """Sanitizes requested model via centralized models registry."""
         return centralized_sanitize_model("gemini", requested_model, is_cad_task=is_cad_task)
 
     @classmethod
-    def _get_models_to_try(cls, requested_model: str, is_cad_task: bool = False) -> List[str]:
+    def _get_models_to_try(cls, requested_model: str, is_cad_task: bool = False) -> list[str]:
         """Returns ordered list of models for Gemini via centralized models registry."""
         return centralized_get_models_to_try("gemini", requested_model, is_cad_task=is_cad_task)
 
     async def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
-        enable_search: Optional[bool] = None,
+        enable_search: bool | None = None,
         **kwargs: Any,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         validate_api_key("gemini", self.api_key)
 
         tools = None
@@ -370,11 +375,11 @@ class GeminiProvider(BaseLlmProvider):
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
-        enable_search: Optional[bool] = None,
+        enable_search: bool | None = None,
         **kwargs: Any,
     ) -> LlmGenerationResult:
         validate_api_key("gemini", self.api_key)
@@ -551,7 +556,7 @@ class GeminiProvider(BaseLlmProvider):
     async def is_available(self) -> bool:
         return bool(self.api_key)
 
-    async def verify_credentials(self, model: Optional[str] = None) -> tuple[bool, str]:
+    async def verify_credentials(self, model: str | None = None) -> tuple[bool, str]:
         if not self.api_key:
             return False, "Gemini API key is missing. Please provide an API key in settings or set GEMINI_API_KEY."
 
@@ -567,4 +572,4 @@ class GeminiProvider(BaseLlmProvider):
                 model_info = client.models.get(model=target_model)
             return True, f"Google Gemini credentials verified successfully (model target: {getattr(model_info, 'name', target_model)})."
         except Exception as e:
-            return False, f"Gemini verification failed for '{target_model}': {str(e)}"
+            return False, f"Gemini verification failed for '{target_model}': {e!s}"

@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import re
 from abc import ABC
-from typing import Any, Dict, Type
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -21,7 +22,7 @@ class ToolCallResult(BaseModel):
     filename: str = Field(..., description="Target download filename with extension")
     artifact_type: str = Field(..., description="Format identifier: 'docx' | 'xlsx' | 'pptx' | 'pdf' | 'csv'")
     title: str = Field(..., description="Human-readable document or artifact title")
-    data: Dict[str, Any] = Field(default_factory=dict, description="Validated payload dictionary")
+    data: dict[str, Any] = Field(default_factory=dict, description="Validated payload dictionary")
 
 
 class BaseTool(ABC):
@@ -32,16 +33,16 @@ class BaseTool(ABC):
     artifact_type: str
     file_extension: str
     prompt_guidelines: str
-    args_schema: Type[BaseModel]
+    args_schema: type[BaseModel]
 
-    def derive_filename(self, data: Dict[str, Any]) -> str:
+    def derive_filename(self, data: dict[str, Any]) -> str:
         """Derives a safe, sanitized filename from document title or tool name."""
         raw_title = data.get("title") or self.name.replace("generate_", "")
         safe = re.sub(r"[^\w\s-]", "", raw_title).strip().replace(" ", "_")
         ext = self.file_extension if self.file_extension.startswith(".") else f".{self.file_extension}"
         return f"{safe[:60]}{ext}" if safe else f"document{ext}"
 
-    def to_gemini_declaration(self) -> Dict[str, Any]:
+    def to_gemini_declaration(self) -> dict[str, Any]:
         """Converts the Pydantic schema to Gemini Function Declaration format."""
         schema = self.args_schema.model_json_schema()
         # Clean up unsupported Gemini JSON Schema keywords
@@ -60,7 +61,7 @@ class BaseTool(ABC):
             },
         }
 
-    def to_openai_tool(self) -> Dict[str, Any]:
+    def to_openai_tool(self) -> dict[str, Any]:
         """Converts the Pydantic schema to OpenAI/Groq Tool Calling format."""
         return {
             "type": "function",

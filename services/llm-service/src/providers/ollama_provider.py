@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
+
 import httpx
 
 from src.config import settings
-from src.domain.models import LlmGenerationResult
 from src.core.base import BaseLlmProvider
 from src.core.common import (
     StreamThoughtExtractor,
@@ -17,6 +18,7 @@ from src.core.common import (
     handle_provider_error,
 )
 from src.core.models import get_models_to_try, is_retryable_model_error
+from src.domain.models import LlmGenerationResult
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +26,13 @@ logger = logging.getLogger(__name__)
 class OllamaProvider(BaseLlmProvider):
     """Local Ollama instance connector supporting streaming and thought extraction (DeepSeek-R1, QwQ)."""
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: str | None = None):
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
         **kwargs: Any,
@@ -81,15 +83,15 @@ class OllamaProvider(BaseLlmProvider):
 
     async def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
         **kwargs: Any,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         start_time = time.perf_counter()
         models_to_try = get_models_to_try("ollama", requested_model=model, is_cad_task=is_cad_task)
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for current_model in models_to_try:
             yielded_any = False
@@ -106,8 +108,8 @@ class OllamaProvider(BaseLlmProvider):
                     },
                 }
 
-                accumulated_tokens: List[str] = []
-                accumulated_thoughts: List[str] = []
+                accumulated_tokens: list[str] = []
+                accumulated_thoughts: list[str] = []
                 thought_extractor = StreamThoughtExtractor()
 
                 async with httpx.AsyncClient(timeout=settings.ollama_timeout_seconds) as client:
@@ -167,7 +169,7 @@ class OllamaProvider(BaseLlmProvider):
         except Exception:
             return False
 
-    async def verify_credentials(self, model: Optional[str] = None) -> tuple[bool, str]:
+    async def verify_credentials(self, model: str | None = None) -> tuple[bool, str]:
         target_model = model or settings.ollama_model
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -180,4 +182,4 @@ class OllamaProvider(BaseLlmProvider):
                     return True, f"Ollama reachable at {self.base_url}, but '{target_model}' is not in installed models: {models}."
                 return True, f"Ollama connected successfully at {self.base_url} (model '{target_model}' ready)."
         except Exception as e:
-            return False, f"Could not connect to Ollama at {self.base_url}: {str(e)}"
+            return False, f"Could not connect to Ollama at {self.base_url}: {e!s}"

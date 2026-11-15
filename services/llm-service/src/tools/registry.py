@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from src.tools.base import BaseTool, ToolCallResult
 from src.tools.definitions import ALL_TOOLS
 
@@ -31,7 +32,7 @@ _LEGACY_TAG_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
-_LEGACY_TYPE_TO_TOOL: Dict[str, str] = {
+_LEGACY_TYPE_TO_TOOL: dict[str, str] = {
     "docx": "generate_word_document",
     "doc": "generate_word_document",
     "xlsx": "generate_excel_sheet",
@@ -47,7 +48,7 @@ class ToolRegistry:
     """Manages all available domain tools, schema conversions, and execution dispatch."""
 
     def __init__(self):
-        self._tools: Dict[str, BaseTool] = {}
+        self._tools: dict[str, BaseTool] = {}
         for tool in ALL_TOOLS:
             self.register(tool)
 
@@ -56,19 +57,19 @@ class ToolRegistry:
         self._tools[tool.name] = tool
         logger.debug("Registered tool: %s", tool.name)
 
-    def get_tool(self, name: str) -> Optional[BaseTool]:
+    def get_tool(self, name: str) -> BaseTool | None:
         """Returns the registered tool by name, or None."""
         return self._tools.get(name)
 
-    def list_tools(self) -> List[BaseTool]:
+    def list_tools(self) -> list[BaseTool]:
         """Returns all registered tool instances."""
         return list(self._tools.values())
 
-    def get_gemini_declarations(self) -> List[Dict[str, Any]]:
+    def get_gemini_declarations(self) -> list[dict[str, Any]]:
         """Returns all tools formatted as Gemini Function Declarations."""
         return [tool.to_gemini_declaration() for tool in self._tools.values()]
 
-    def get_openai_tools(self) -> List[Dict[str, Any]]:
+    def get_openai_tools(self) -> list[dict[str, Any]]:
         """Returns all tools formatted as OpenAI / Groq tool definitions."""
         return [tool.to_openai_tool() for tool in self._tools.values()]
 
@@ -90,7 +91,7 @@ class ToolRegistry:
 
         return "\n".join(sections)
 
-    def execute(self, tool_name: str, arguments: Dict[str, Any]) -> ToolCallResult:
+    def execute(self, tool_name: str, arguments: dict[str, Any]) -> ToolCallResult:
         """Validates arguments against the tool's Pydantic schema and returns a ToolCallResult."""
         tool = self.get_tool(tool_name)
         if not tool:
@@ -105,7 +106,7 @@ class ToolRegistry:
 
         return tool.execute(**arguments)
 
-    def extract_tool_calls(self, raw_text: str) -> List[ToolCallResult]:
+    def extract_tool_calls(self, raw_text: str) -> list[ToolCallResult]:
         """Extracts and executes/validates tool calls from LLM response text.
 
         Tries fenced tool blocks first. Falls back to legacy XML tags for backward compatibility.
@@ -115,8 +116,8 @@ class ToolRegistry:
             return results
         return self._extract_legacy_tags(raw_text)
 
-    def _extract_tool_fences(self, raw_text: str) -> List[ToolCallResult]:
-        results: List[ToolCallResult] = []
+    def _extract_tool_fences(self, raw_text: str) -> list[ToolCallResult]:
+        results: list[ToolCallResult] = []
         for match in _TOOL_FENCE_RE.finditer(raw_text):
             tool_name = match.group(1).strip()
             json_body = match.group(2).strip()
@@ -145,8 +146,8 @@ class ToolRegistry:
                     pass
         return results
 
-    def _extract_legacy_tags(self, raw_text: str) -> List[ToolCallResult]:
-        results: List[ToolCallResult] = []
+    def _extract_legacy_tags(self, raw_text: str) -> list[ToolCallResult]:
+        results: list[ToolCallResult] = []
         for match in _LEGACY_TAG_RE.finditer(raw_text):
             filename = match.group(1).strip()
             file_type = match.group(2).strip().lower()

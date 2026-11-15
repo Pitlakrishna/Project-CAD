@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 from src.config import settings
 
@@ -31,7 +30,7 @@ class ProviderModelConfig:
 GEMINI_BANNED_MODELS: frozenset[str] = frozenset()
 
 
-def _build_registry() -> Dict[str, ProviderModelConfig]:
+def _build_registry() -> dict[str, ProviderModelConfig]:
     """Dynamically builds the provider model registry pulling configured defaults from settings."""
     return {
         "gemini": ProviderModelConfig(
@@ -129,7 +128,7 @@ def _build_registry() -> Dict[str, ProviderModelConfig]:
     }
 
 
-def get_provider_config(provider: str) -> Optional[ProviderModelConfig]:
+def get_provider_config(provider: str) -> ProviderModelConfig | None:
     """Retrieves the model configuration for a provider."""
     registry = _build_registry()
     return registry.get((provider or "").lower().strip())
@@ -137,7 +136,7 @@ def get_provider_config(provider: str) -> Optional[ProviderModelConfig]:
 
 def sanitize_model(
     provider: str,
-    requested_model: Optional[str],
+    requested_model: str | None,
     is_cad_task: bool = False,
 ) -> str:
     """Sanitizes requested model, substituting defaults and explicitly banning deprecated targets.
@@ -168,9 +167,9 @@ def sanitize_model(
 
 def get_models_to_try(
     provider: str,
-    requested_model: Optional[str] = None,
+    requested_model: str | None = None,
     is_cad_task: bool = False,
-) -> List[str]:
+) -> list[str]:
     """Returns an ordered list of models: sanitized primary target first, followed by safe fallback candidates."""
     config = get_provider_config(provider)
     if not config:
@@ -178,7 +177,7 @@ def get_models_to_try(
         return [clean] if clean else ["default"]
 
     clean_model = sanitize_model(provider, requested_model, is_cad_task=is_cad_task)
-    models: List[str] = [clean_model]
+    models: list[str] = [clean_model]
 
     candidates = config.cad_fallbacks if is_cad_task else config.chat_fallbacks
     for candidate in candidates:
