@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { ChatMessage } from "../lib/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { CadModelCard } from "./CadModelCard";
@@ -13,7 +13,6 @@ import {
   IconEdit,
   IconClose,
   IconSend,
-  IconGear,
 } from "./icons";
 
 interface ChatMessageItemProps {
@@ -247,7 +246,7 @@ export function ChatMessageItem({
                             <span className="font-semibold text-orange-300 text-sm">Context Window Limit Exceeded</span>
                           </div>
                           <p className="text-orange-200/90 leading-relaxed text-xs">
-                            The conversation history, 3D CAD model, or prompt exceeds the provider's token limit.
+                            The conversation history, 3D CAD model, or prompt exceeds the provider&apos;s token limit.
                           </p>
                           <div className="text-[11px] text-orange-200/80 bg-orange-950/40 p-2.5 rounded-lg border border-orange-800/30 space-y-1">
                             <div className="font-medium text-orange-300 mb-1">How to resolve:</div>

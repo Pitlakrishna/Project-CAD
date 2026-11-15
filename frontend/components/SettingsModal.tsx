@@ -510,6 +510,27 @@ export function SettingsModal({
                       />
                     </div>
                   )}
+
+                  {/* LLM Backend URL Override */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <label className="text-[#a3a3a3]">LLM Backend URL</label>
+                      <button
+                        type="button"
+                        onClick={() => updateSettingsDynamically({ backendUrl: DEFAULT_SETTINGS.backendUrl })}
+                        className="text-[10px] text-blue-400 hover:underline cursor-pointer"
+                      >
+                        Reset Default
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder={DEFAULT_SETTINGS.backendUrl}
+                      value={formData.backendUrl}
+                      onChange={(e) => updateSettingsDynamically({ backendUrl: e.target.value.trim() })}
+                      className="w-full px-3 py-1.5 rounded-lg bg-[#1b1b1b] border border-[#333333] text-xs text-[#f4f4f4] placeholder-[#555] font-mono focus:outline-hidden"
+                    />
+                  </div>
                 </div>
               )}
             </div>

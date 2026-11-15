@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 from src.config import settings
 
@@ -28,7 +28,7 @@ class ProviderModelConfig:
 
 
 # Banned models registry (kept empty so real models like gemini-2.0-flash / gemini-2.5-flash are not blocked)
-GEMINI_BANNED_MODELS = frozenset()
+GEMINI_BANNED_MODELS: frozenset[str] = frozenset()
 
 
 def _build_registry() -> Dict[str, ProviderModelConfig]:

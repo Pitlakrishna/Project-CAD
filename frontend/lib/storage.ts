@@ -38,7 +38,13 @@ export function loadSettings(): AppSettings {
     if (parsed.selectedProvider === "mock" || parsed.selectedProvider === "ollama") {
       parsed.selectedProvider = "gemini";
     }
-    if (parsed.backendUrl === "http://localhost:8000") {
+    const envBackendUrl = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_BACKEND_URL : undefined;
+    if (
+      envBackendUrl &&
+      (!parsed.backendUrl || parsed.backendUrl.includes("127.0.0.1") || parsed.backendUrl.includes("localhost"))
+    ) {
+      parsed.backendUrl = envBackendUrl;
+    } else if (parsed.backendUrl === "http://localhost:8000") {
       parsed.backendUrl = "http://127.0.0.1:8000";
     }
     // Ensure separate chat and CAD models are explicitly initialized

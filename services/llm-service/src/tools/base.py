@@ -10,8 +10,8 @@ Every tool implements this abstract class, providing:
 from __future__ import annotations
 
 import re
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Type
+from abc import ABC
+from typing import Any, Dict, Type
 from pydantic import BaseModel, Field
 
 

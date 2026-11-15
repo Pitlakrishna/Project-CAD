@@ -345,7 +345,7 @@ export function formatErrorMessage(errText: string, provider?: string): string {
 async function robustFetch(url: string, options: RequestInit): Promise<Response> {
   try {
     return await fetch(url, options);
-  } catch (err: any) {
+  } catch {
     // If localhost failed (common Windows IPv6 resolution issue where uvicorn binds to 127.0.0.1), fallback
     if (url.includes("localhost:8000")) {
       try {
@@ -543,10 +543,56 @@ export async function refineCadStream(
   return streamSseHelper(endpoint, payload, headers, onThought, onToken, onReset);
 }
 
+function getDefaultCadBaseUrl(): string {
+  return (typeof process !== "undefined" && process.env.NEXT_PUBLIC_CAD_SERVICE_URL) || "http://localhost:8002";
+}
+
+function isLocalBrowser(): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location?.hostname || "";
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+}
+
+function buildCadCandidateUrls(
+  upstreamPath: string,
+  proxyPath: string,
+  explicitBaseUrl?: string
+): string[] {
+  const isBrowser = typeof window !== "undefined";
+  const envPublicCad = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_CAD_SERVICE_URL : undefined;
+  const urls: string[] = [];
+
+  if (explicitBaseUrl) {
+    const clean = explicitBaseUrl.replace(/\/+$/, "");
+    urls.push(`${clean}${upstreamPath}`);
+    if (clean.includes("localhost:8002")) {
+      urls.push(clean.replace("localhost:8002", "127.0.0.1:8002") + upstreamPath);
+    }
+  } else if (envPublicCad) {
+    urls.push(`${envPublicCad.replace(/\/+$/, "")}${upstreamPath}`);
+  }
+
+  if (isBrowser) {
+    // Prefer direct public CAD URL if configured (avoids Vercel proxy timeout), with proxy fallback
+    if (envPublicCad && !explicitBaseUrl) {
+      urls.push(proxyPath);
+    } else {
+      urls.unshift(proxyPath);
+    }
+  }
+
+  if (!explicitBaseUrl && (!isBrowser || isLocalBrowser())) {
+    urls.push(`http://127.0.0.1:8002${upstreamPath}`);
+    urls.push(`http://localhost:8002${upstreamPath}`);
+  }
+
+  return Array.from(new Set(urls));
+}
+
 export function getCadDownloadUrl(
   modelId: string,
   format: "step" | "stl" | "dxf",
-  baseUrl: string = "http://localhost:8002"
+  baseUrl: string = getDefaultCadBaseUrl()
 ): string {
   const cleanUrl = baseUrl.replace(/\/+$/, "");
   return `${cleanUrl}/api/v1/cad/download/${modelId}/${format}`;
@@ -556,23 +602,17 @@ export async function downloadCadFileBlob(
   modelId: string,
   format: "step" | "stl" | "dxf",
   cadResponse?: CadGenerationResponse | null,
-  baseUrl: string = "http://localhost:8002"
+  baseUrl?: string
 ): Promise<Blob> {
-  const isBrowser = typeof window !== "undefined";
-  const cleanUrl = baseUrl.replace(/\/+$/, "");
-  const urlsToTry: string[] = [];
-
-  if (isBrowser) {
-    urlsToTry.push(`/api/cad/download/${modelId}/${format}`);
-  }
-  urlsToTry.push(`${cleanUrl}/api/v1/cad/download/${modelId}/${format}`);
-  if (cleanUrl.includes("localhost:8002")) {
-    urlsToTry.push(cleanUrl.replace("localhost:8002", "127.0.0.1:8002") + `/api/v1/cad/download/${modelId}/${format}`);
-  }
+  const urlsToTry = buildCadCandidateUrls(
+    `/api/v1/cad/download/${modelId}/${format}`,
+    `/api/cad/download/${modelId}/${format}`,
+    baseUrl
+  );
 
   for (const url of urlsToTry) {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(45000) });
       if (res && res.ok) {
         return await res.blob();
       }
@@ -581,34 +621,39 @@ export async function downloadCadFileBlob(
     }
   }
 
-
   // Fallback: If in-memory cache expired on cad-service, re-export on the fly
   if (cadResponse?.replicad_code) {
-    const tryExport = async (targetHost: string) => {
-      const exportRes = await fetch(`${targetHost}/api/v1/cad/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          script: cadResponse.replicad_code,
-          parameters: cadResponse.parameters || {},
-          format,
-        }),
-      });
-      if (!exportRes.ok) return null;
-      const data = await exportRes.json();
-      if (!data.downloadUrl) return null;
-      const retryRes = await fetch(`${targetHost}${data.downloadUrl}`);
-      if (retryRes.ok) {
-        return await retryRes.blob();
-      }
-      return null;
-    };
+    const isBrowser = typeof window !== "undefined";
+    const exportTargets = buildCadCandidateUrls("/api/v1/cad/export", "/api/cad/export", baseUrl);
 
-    let blob = await tryExport(cleanUrl).catch(() => null);
-    if (!blob && cleanUrl.includes("localhost:8002")) {
-      blob = await tryExport("http://127.0.0.1:8002").catch(() => null);
+    for (const exportEndpoint of exportTargets) {
+      try {
+        const exportRes = await fetch(exportEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script: cadResponse.replicad_code,
+            parameters: cadResponse.parameters || {},
+            format,
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+        if (!exportRes.ok) continue;
+        const data = await exportRes.json();
+        if (!data.downloadUrl) continue;
+
+        const downloadUrl = exportEndpoint === "/api/cad/export" && isBrowser
+          ? `/api/cad/download/${data.modelId || modelId}/${format}`
+          : `${exportEndpoint.replace(/\/api\/v1\/cad\/export$/, "")}${data.downloadUrl}`;
+
+        const retryRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(45000) });
+        if (retryRes.ok) {
+          return await retryRes.blob();
+        }
+      } catch {
+        // try next export target
+      }
     }
-    if (blob) return blob;
   }
 
   throw new Error(`Failed to download ${format.toUpperCase()} file`);
@@ -617,27 +662,10 @@ export async function downloadCadFileBlob(
 
 export async function generateModelGeometry(
   script: string,
-  parameters: Record<string, any> = {},
+  parameters: Record<string, unknown> = {},
   cadServiceUrl?: string
 ): Promise<CadGeometryResponse | null> {
-  const isBrowser = typeof window !== "undefined";
-  const urlsToTry: string[] = [];
-
-  if (cadServiceUrl) {
-    const clean = cadServiceUrl.replace(/\/+$/, "");
-    urlsToTry.push(`${clean}/api/v1/cad/generate`);
-    if (clean.includes("localhost:8002")) {
-      urlsToTry.push(clean.replace("localhost:8002", "127.0.0.1:8002") + "/api/v1/cad/generate");
-    }
-  }
-
-  if (isBrowser) {
-    urlsToTry.unshift("/api/cad/generate");
-  }
-  if (!cadServiceUrl) {
-    urlsToTry.push("http://127.0.0.1:8002/api/v1/cad/generate");
-    urlsToTry.push("http://localhost:8002/api/v1/cad/generate");
-  }
+  const urlsToTry = buildCadCandidateUrls("/api/v1/cad/generate", "/api/cad/generate", cadServiceUrl);
 
   let lastError: Error | null = null;
   for (const url of urlsToTry) {
@@ -646,7 +674,7 @@ export async function generateModelGeometry(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ script, parameters }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(45000),
       });
 
       if (res.ok) {
@@ -655,8 +683,8 @@ export async function generateModelGeometry(
         const errData = await res.json().catch(() => ({}));
         lastError = new Error(errData.error || `CAD service error (${res.status})`);
       }
-    } catch (err: any) {
-      lastError = err;
+    } catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error(String(err));
     }
   }
 
@@ -670,24 +698,11 @@ export async function fetchCadScene(
   modelId: string,
   cadServiceUrl?: string
 ): Promise<CadSceneResponse | null> {
-  const isBrowser = typeof window !== "undefined";
-  const urlsToTry: string[] = [];
-
-  if (cadServiceUrl) {
-    const clean = cadServiceUrl.replace(/\/+$/, "");
-    urlsToTry.push(`${clean}/api/v1/cad/scene/${modelId}`);
-    if (clean.includes("localhost:8002")) {
-      urlsToTry.push(clean.replace("localhost:8002", "127.0.0.1:8002") + `/api/v1/cad/scene/${modelId}`);
-    }
-  }
-
-  if (isBrowser) {
-    urlsToTry.unshift(`/api/cad/scene/${modelId}`);
-  }
-  if (!cadServiceUrl) {
-    urlsToTry.push(`http://127.0.0.1:8002/api/v1/cad/scene/${modelId}`);
-    urlsToTry.push(`http://localhost:8002/api/v1/cad/scene/${modelId}`);
-  }
+  const urlsToTry = buildCadCandidateUrls(
+    `/api/v1/cad/scene/${modelId}`,
+    `/api/cad/scene/${modelId}`,
+    cadServiceUrl
+  );
 
   let lastError: Error | null = null;
   for (const url of urlsToTry) {
@@ -695,7 +710,7 @@ export async function fetchCadScene(
       const res = await fetch(url, {
         method: "GET",
         headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(45000),
       });
 
       if (res.ok) {
@@ -704,8 +719,8 @@ export async function fetchCadScene(
         const errData = await res.json().catch(() => ({}));
         lastError = new Error(errData.error || `CAD service error (${res.status})`);
       }
-    } catch (err: any) {
-      lastError = err;
+    } catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error(String(err));
     }
   }
 

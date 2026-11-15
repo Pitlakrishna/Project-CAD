@@ -360,7 +360,6 @@ export function generateBlueprintPackage(
     texts: secTexts,
     viewBox: { xMin: 0, yMin: 0, width: paramColX + 120, height: Math.max(secY + h + 40, paramRowY + 30) },
   };
-  const foundationDetailView = sectionDetailView;
 
   // =========================================================================
   // VIEW 3: 3D Isometric Axonometric Projection (Wireframe with Axes)
@@ -447,7 +446,6 @@ export function generateBlueprintPackage(
     texts: isoTexts,
     viewBox: { xMin: 0, yMin: 0, width: 220, height: 200 },
   };
-  const staircaseDetailView = isometricDetailView;
 
   // =========================================================================
   // VIEW 4: Component Exploded View / Right Side Profile

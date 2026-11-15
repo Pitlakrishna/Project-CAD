@@ -1,44 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { fetchCadUpstream } from "../../../../lib/cadProxy";
+
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const upstream = await fetchCadUpstream("/api/v1/cad/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
 
-    const cadBase = process.env.CAD_SERVICE_URL || process.env.NEXT_PUBLIC_CAD_SERVICE_URL;
-    const cadUrls = [
-      ...(cadBase ? [`${cadBase.replace(/\/+$/, "")}/api/v1/cad/generate`] : []),
-      "http://127.0.0.1:8002/api/v1/cad/generate",
-      "http://localhost:8002/api/v1/cad/generate",
-    ];
-
-    let lastError: any = null;
-
-    for (const url of cadUrls) {
-      try {
-        const upstream = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          cache: "no-store",
-        });
-
-        const data = await upstream.json().catch(() => ({}));
-        return NextResponse.json(data, { status: upstream.status });
-      } catch (err: any) {
-        lastError = err;
-      }
-    }
-
+    const data = await upstream.json().catch(() => ({}));
+    return NextResponse.json(data, { status: upstream.status });
+  } catch (err: unknown) {
+    const error = err instanceof Error ? err : new Error("Failed to connect to CAD service kernel");
+    const status = error.name === "SyntaxError" ? 400 : 502;
     return NextResponse.json(
-      {
-        error: lastError?.message || "Failed to connect to CAD service kernel",
-      },
-      { status: 502 }
-    );
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message || "Invalid request payload" },
-      { status: 400 }
+      { error: error.message },
+      { status }
     );
   }
 }

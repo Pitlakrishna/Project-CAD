@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { config } from "../config.js";
 import { GeometryMetrics } from "../engine/metrics.js";
 
 export interface CachedPart {
@@ -92,4 +93,4 @@ class ModelStore {
   }
 }
 
-export const modelStore = new ModelStore();
+export const modelStore = new ModelStore(config.maxCacheItems);

@@ -280,9 +280,9 @@ class CadGenerationService:
                 break
 
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=30.0) as client:
                     resp = await client.post(
-                        f"{settings.cad_service_url}/api/v1/cad/generate",
+                        f"{settings.cad_service_url.rstrip('/')}/api/v1/cad/generate",
                         json={"script": current_code, "parameters": current_params},
                     )
 
@@ -480,7 +480,7 @@ class CadGenerationService:
         # Autonomous LLM Decision Guard: If user requested CAD design, ensure LLM generates the code block
         if is_cad_task and not parsed.code:
             logger.info("CAD task requested, but LLM omitted code block. Prompting LLM to synthesize Replicad model...")
-            synth_parsed, synth_raw, synth_tokens = await self._synthesize_cad_with_llm(
+            synth_parsed, _synth_raw, synth_tokens = await self._synthesize_cad_with_llm(
                 provider=provider,
                 messages=messages,
                 model_name=model_name,
@@ -912,7 +912,7 @@ class CadGenerationService:
         # Autonomous LLM Decision Guard: If user requested CAD refinement, ensure LLM generates updated code block
         if is_cad_task and not parsed.code:
             logger.info("CAD refinement requested, but LLM omitted code block. Prompting LLM to synthesize updated model...")
-            synth_parsed, synth_raw, synth_tokens = await self._synthesize_cad_with_llm(
+            synth_parsed, _synth_raw, synth_tokens = await self._synthesize_cad_with_llm(
                 provider=provider,
                 messages=messages,
                 model_name=model_name,
@@ -1051,6 +1051,35 @@ class CadGenerationService:
                     "metadata": meta,
                 }
             return
+
+        is_cad_task = ContextBuilder.is_cad_intent(request.prompt)
+        model_name = self.resolve_effective_model(
+            provider_name,
+            requested_model=request.model,
+            is_cad_task=is_cad_task,
+            chat_model=request.chat_model,
+            cad_model=request.cad_model,
+        )
+        messages = ContextBuilder.build_refinement_messages(
+            refinement_prompt=request.prompt,
+            previous_code=request.previous_code,
+            previous_parameters=request.previous_parameters,
+            is_cad_task=is_cad_task,
+            history=getattr(request, "history", None),
+        )
+
+        final_payload = None
+        async for item in provider.generate_stream(
+            messages=messages,
+            model=model_name,
+            temperature=0.2,
+            is_cad_task=is_cad_task,
+            enable_search=request.enable_search,
+        ):
+            if item.get("type") == "final_payload":
+                final_payload = item
+            else:
+                yield item
 
         if final_payload:
             full_text = final_payload.get("raw_response", "")

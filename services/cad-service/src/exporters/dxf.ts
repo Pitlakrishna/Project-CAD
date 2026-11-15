@@ -63,7 +63,6 @@ export async function exportToDXF(shapeOrDrawing: any): Promise<Buffer> {
     }
 
     const w = maxX - minX;
-    const d = maxY - minY;
 
     const dxfLines: string[] = [
       "0", "SECTION", "2", "HEADER", "9", "$ACADVER", "1", "AC1009", "0", "ENDSEC",

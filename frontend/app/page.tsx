@@ -11,7 +11,7 @@ import {
   getActiveSessionId,
   setActiveSessionId,
 } from "../lib/storage";
-import { generateCad, refineCad, generateCadStream, refineCadStream, generateModelGeometry, formatErrorMessage } from "../lib/api";
+import { refineCad, generateCadStream, refineCadStream, generateModelGeometry, formatErrorMessage } from "../lib/api";
 import { Sidebar } from "../components/Sidebar";
 import { SettingsModal } from "../components/SettingsModal";
 import { AdsPanel } from "../components/AdsPanel";
@@ -242,16 +242,6 @@ export default function Home() {
     }
 
     return hasCreationVerb && hasCadTarget;
-  }
-
-  function isDocumentIntent(prompt: string): boolean {
-    const text = prompt.toLowerCase().trim();
-    if (!text) return false;
-    const cleanPunct = text.replace(/[^\w\s]/g, "").trim();
-    const isGreetingOrThanks = /^(?:thanks|thank you|thx|many thanks|appreciate it|hi|hello|hey|greetings|good morning|good afternoon|good evening|cool|nice|awesome|great|ok|okay|bye|goodbye)\b/i.test(cleanPunct);
-    const hasDocAction = /\b(?:generate|create|make|write|build|produce|export|draft|provide|prepare|download)\b/i.test(text);
-    if (isGreetingOrThanks && !hasDocAction) return false;
-    return /\b(?:document|documentation|docs?|report|whitepaper|presentation|slides?|deck|ppt|pptx|excel|spreadsheet|sheets?|bom|csv|export|spec\s*sheet|manual|guide|writeup)\b/i.test(text);
   }
 
   function extractFileArtifacts(text: string): { cleanText: string; artifacts: FileArtifact[] } {

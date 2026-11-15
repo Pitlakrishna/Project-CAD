@@ -1,5 +1,7 @@
-from typing import List, Optional
-from pydantic_settings import BaseSettings, SettingsConfigDict
+import json
+from typing import Annotated, List, Optional
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -10,7 +12,7 @@ class Settings(BaseSettings):
     )
 
     env: str = "dev"
-    debug: bool = True
+    debug: bool = False
     port: int = 8000
     host: str = "0.0.0.0"
     app_version: str = "0.1.0"
@@ -60,14 +62,16 @@ class Settings(BaseSettings):
     deepseek_fast_model: str = "deepseek-chat"
     deepseek_timeout_seconds: float = 60.0
 
-    # Redis Cache Settings
+    # Redis Cache Settings (supports REDIS_URL for Render/Upstash or REDIS_HOST/PORT/PASSWORD)
+    redis_url: Optional[str] = None
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_password: Optional[str] = None
     cache_enabled: bool = True
     cache_ttl_seconds: int = 86400
 
-    # RabbitMQ Settings
+    # RabbitMQ Settings (supports RABBITMQ_URL for CloudAMQP or host/port/user/pass)
+    rabbitmq_url: Optional[str] = None
     rabbitmq_host: str = "localhost"
     rabbitmq_port: int = 5672
     rabbitmq_user: str = "guest"
@@ -79,8 +83,38 @@ class Settings(BaseSettings):
     cad_service_url: str = "http://localhost:8002"
     auto_repair_cad_errors: bool = True
 
-    # CORS (default to wildcard for seamless frontend integration, customizable via env)
-    cors_origins: List[str] = ["*"]
+    @field_validator("cad_service_url", mode="before")
+    @classmethod
+    def _normalize_cad_service_url(cls, v: object) -> str:
+        raw = str(v or "").strip().rstrip("/")
+        if not raw:
+            return "http://localhost:8002"
+        if raw.startswith(("http://", "https://")):
+            return raw
+        scheme = "http://" if raw.startswith(("localhost", "127.0.0.1")) else "https://"
+        return f"{scheme}{raw}"
+
+    # CORS (accepts comma-separated string or JSON list via CORS_ORIGINS)
+    cors_origins: Annotated[List[str], NoDecode] = ["*"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, v: object) -> List[str]:
+        if isinstance(v, list):
+            return [str(item).strip() for item in v if str(item).strip()]
+        if isinstance(v, str):
+            raw = v.strip()
+            if not raw:
+                return ["*"]
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except Exception:
+                    pass
+            return [item.strip() for item in raw.split(",") if item.strip()]
+        return ["*"]
 
 
 settings = Settings()

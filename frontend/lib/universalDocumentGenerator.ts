@@ -1099,7 +1099,6 @@ export async function compilePowerPointPresentation(artifact: FileArtifact): Pro
 
 export async function compilePdfDocument(artifact: FileArtifact): Promise<Blob> {
   const docData = normalizeDocumentData(artifact);
-  const { theme } = docData;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
   let pageNumber = 1;

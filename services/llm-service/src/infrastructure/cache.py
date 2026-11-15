@@ -18,14 +18,22 @@ class PromptCache:
         self._redis: Optional[aioredis.Redis] = None
         if settings.cache_enabled:
             try:
-                self._redis = aioredis.Redis(
-                    host=settings.redis_host,
-                    port=settings.redis_port,
-                    password=settings.redis_password,
-                    decode_responses=True,
-                    socket_connect_timeout=0.15,
-                    socket_timeout=0.15,
-                )
+                if settings.redis_url:
+                    self._redis = aioredis.from_url(
+                        settings.redis_url,
+                        decode_responses=True,
+                        socket_connect_timeout=0.5,
+                        socket_timeout=0.5,
+                    )
+                else:
+                    self._redis = aioredis.Redis(
+                        host=settings.redis_host,
+                        port=settings.redis_port,
+                        password=settings.redis_password,
+                        decode_responses=True,
+                        socket_connect_timeout=0.15,
+                        socket_timeout=0.15,
+                    )
             except Exception as e:
                 logger.debug("Failed to initialize Redis cache connection: %s", e)
                 self._redis = None
@@ -63,9 +71,9 @@ class PromptCache:
             self._redis = None
 
     async def ping(self) -> bool:
-        if not self._redis:
+        if not self._redis or not settings.cache_enabled:
             return False
         try:
-            return bool(await self._redis.ping())
+            return bool(await asyncio.wait_for(self._redis.ping(), timeout=0.3))
         except Exception:
             return False

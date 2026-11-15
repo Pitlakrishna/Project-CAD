@@ -11,7 +11,6 @@ from src.core.common import (
     StreamThoughtExtractor,
     create_generation_result,
     create_stream_final_payload,
-    execute_with_model_fallback,
     format_chat_messages,
     handle_provider_error,
     validate_api_key,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Dict, List, Optional
 import httpx
 
@@ -227,7 +226,7 @@ class EngineeringSpecSearchExecutor:
             "status": "success",
             "component": target_component or clean_query,
             "title": f"Engineering Specifications for {clean_query}",
-            "standard_envelope": {"width": 120.0, "length": 120.0, "height": 30.0},
-            "live_search_snippets": live_snippets if live_snippets else [f"Standard industrial envelope for {clean_query}."],
-            "source": "Google / Web Engineering Knowledge Base",
+            "standard_envelope": None,
+            "live_search_snippets": live_snippets,
+            "source": "DuckDuckGo Instant API" if live_snippets else "LLM Parametric Design Inference",
         }

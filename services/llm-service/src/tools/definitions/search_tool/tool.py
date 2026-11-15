@@ -2,7 +2,6 @@
 
 from typing import Any, Dict, Optional
 from src.tools.base import BaseTool, ToolCallResult
-from src.tools.definitions.search_tool.executor import EngineeringSpecSearchExecutor
 from src.tools.definitions.search_tool.prompt import SEARCH_TOOL_PROMPT
 from src.tools.definitions.search_tool.schema import SearchSpecsArgs
 

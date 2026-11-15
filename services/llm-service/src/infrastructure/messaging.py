@@ -43,15 +43,21 @@ class EventPublisher:
                 pass
 
             try:
-                credentials = pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_pass)
-                parameters = pika.ConnectionParameters(
-                    host=settings.rabbitmq_host,
-                    port=settings.rabbitmq_port,
-                    credentials=credentials,
-                    connection_attempts=2,
-                    retry_delay=1,
-                    socket_timeout=2.0,
-                )
+                if settings.rabbitmq_url:
+                    parameters: pika.ConnectionParameters | pika.URLParameters = pika.URLParameters(
+                        settings.rabbitmq_url
+                    )
+                    parameters.socket_timeout = 2.0
+                else:
+                    credentials = pika.PlainCredentials(settings.rabbitmq_user, settings.rabbitmq_pass)
+                    parameters = pika.ConnectionParameters(
+                        host=settings.rabbitmq_host,
+                        port=settings.rabbitmq_port,
+                        credentials=credentials,
+                        connection_attempts=2,
+                        retry_delay=1,
+                        socket_timeout=2.0,
+                    )
                 self._connection = pika.BlockingConnection(parameters)
                 self._channel = self._connection.channel()
                 self._channel.exchange_declare(

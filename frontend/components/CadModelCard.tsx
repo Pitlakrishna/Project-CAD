@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { CadGeometryResponse, CadGenerationResponse, CadSceneResponse } from "../lib/types";
-import { getCadDownloadUrl, downloadCadFileBlob, fetchCadScene } from "../lib/api";
+import { downloadCadFileBlob, fetchCadScene } from "../lib/api";
 import { generateBlueprintPackage } from "../lib/blueprintGenerator";
 import { downloadEngineeringBlueprintPdf } from "../lib/pdfGenerator";
-import { formatMass, formatVolume, resolveEngineeringMaterial } from "../lib/physicalMaterials";
+import { formatMass, resolveEngineeringMaterial } from "../lib/physicalMaterials";
 
 const StudioViewer3D = dynamic(
   () => import("./StudioViewer3D").then((m) => m.StudioViewer3D),
@@ -254,8 +254,6 @@ export function CadModelCard({ geometry, cadResponse, userPrompt, onRefinePrompt
 
   const dim = geometry.metrics.boundingBox?.dimensions || { width: 0, depth: 0, height: 0 };
   const volume = geometry.metrics.volume ?? 0;
-  const triangles = geometry.metrics.triangleCount ?? 0;
-  const faces = geometry.metrics.faceCount;
 
   // Resolve material info and dynamic mass properties
   const resolvedMat = resolveEngineeringMaterial(
@@ -292,7 +290,7 @@ export function CadModelCard({ geometry, cadResponse, userPrompt, onRefinePrompt
       if (tweaks.length >= 6) break;
     }
     return tweaks;
-  }, [cadResponse?.parameters, onRefinePrompt]);
+  }, [cadResponse, onRefinePrompt]);
 
   return (
     <div className="w-full my-3 rounded-2xl bg-[#161616] border border-[#272727] overflow-hidden shadow-lg transition-all">

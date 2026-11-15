@@ -8,14 +8,12 @@ import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from src.config import settings
-from src.domain.exceptions import ProviderException
 from src.domain.models import LlmGenerationResult
 from src.core.base import BaseLlmProvider
 from src.core.common import handle_provider_error, validate_api_key
 from src.core.models import (
     GEMINI_BANNED_MODELS,
     get_models_to_try as centralized_get_models_to_try,
-    is_retryable_model_error,
     sanitize_model as centralized_sanitize_model,
 )
 
@@ -557,7 +555,7 @@ class GeminiProvider(BaseLlmProvider):
         if not self.api_key:
             return False, "Gemini API key is missing. Please provide an API key in settings or set GEMINI_API_KEY."
 
-        target_model = (model or getattr(settings, "gemini_model", self.DEFAULT_MODEL)).strip()
+        target_model = str(model or getattr(settings, "gemini_model", self.DEFAULT_MODEL) or self.DEFAULT_MODEL).strip()
         try:
             from google import genai
             from google.genai import types
