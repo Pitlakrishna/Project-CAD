@@ -1,8 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { AppSettings, ChatMessage, ChatSession, ProviderType, CadGenerationResponse, FileArtifact } from "../lib/types";
-import { parseMarkdownTable, parseMarkdownToSlides } from "../lib/universalDocumentGenerator";
+import { AppSettings, ChatMessage, ChatSession, ProviderType, CadGenerationResponse, FileArtifact, ChatHistoryMessage } from "../lib/types";
 import {
   DEFAULT_SETTINGS,
   loadSettings,
@@ -12,7 +11,7 @@ import {
   getActiveSessionId,
   setActiveSessionId,
 } from "../lib/storage";
-import { generateCad, refineCad, generateCadStream, refineCadStream, generateModelGeometry, formatErrorMessage } from "../lib/api";
+import { refineCad, generateCadStream, refineCadStream, generateModelGeometry, formatErrorMessage } from "../lib/api";
 import { Sidebar } from "../components/Sidebar";
 import { SettingsModal } from "../components/SettingsModal";
 import { AdsPanel } from "../components/AdsPanel";
@@ -26,6 +25,11 @@ import {
 } from "../components/icons";
 
 const EMPTY_SUGGESTIONS = [
+  {
+    title: "Mountain Valley with River",
+    desc: "Procedural 3D WebGL rolling landscape with pine trees",
+    prompt: "Create a photorealistic mountain valley landscape with a winding river and pine trees",
+  },
   {
     title: "Electronics Junction Box",
     desc: "Watertight box with screw bosses and clear glass lid",
@@ -52,6 +56,7 @@ export default function Home() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null);
+  const [engineMode, setEngineMode] = useState<"auto" | "cad" | "threejs">("auto");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -149,32 +154,58 @@ export default function Home() {
 
   function isCadModificationIntent(prompt: string): boolean {
     const text = prompt.toLowerCase().trim();
+    if (!text) return false;
 
-    // 1. Explicit non-modification conversational, question & advice patterns (DO NOT burn CAD tokens)
-    const nonModPatterns = [
-      /^(?:hi|hello|hey|greetings|hola|good morning|good afternoon|good evening)\b/i,
-      /^(?:thanks|thank you|thx|ok|okay|cool|great|awesome|good job|nice|bye|goodbye)\b/i,
-      /^(?:what|which|who|where|when|why|how|can you|could you|explain|tell me|is it|does it|should i)\b/i,
-      /\b(?:how to slice|print settings|bed temperature|nozzle temp|infill|warping|slice|troubleshoot|advice|tips)\b/i,
-    ];
-
-    if (nonModPatterns.some((pattern) => pattern.test(text))) {
+    // 1. Pure conversational greetings, thank-yous, and praise (DO NOT trigger CAD modification)
+    const pureChitChat =
+      /^(?:hi|hello|hey|greetings|hola|good\s+(?:morning|afternoon|evening)|thanks|thank\s+you|thx|cool|awesome|great|good\s+job|nice|ok|okay|bye|goodbye)[!.?]*$/i;
+    if (pureChitChat.test(text)) {
       return false;
     }
 
-    // 2. Strict CAD modification directives (Imperatives to edit the 3D model)
+    // 2. Pure slicing or 3D printing software advice questions (e.g. "what infill should I use?")
+    if (
+      /\b(?:how\s+to\s+slice|slicing\s+settings|infill\s+percentage|bed\s+temperature|nozzle\s+temp(?:erature)?|warping\s+issue|first\s+layer\s+height|supports?\s+setting)\b/i.test(
+        text
+      )
+    ) {
+      return false;
+    }
+
+    // 3. Strict CAD & 3D modification imperatives and directives (handles "can you", "please", "how about", and direct commands)
     const modifyDirectives = [
-      /\b(?:modify|resize|scale|enlarge|shrink)\b/i,
-      /\bmake\s+(?:it|the\s+[\w\s]{1,25})\s+(?:wider|thicker|taller|bigger|smaller|longer|narrower|shorter)\b/i,
-      /\b(?:increase|decrease|reduce)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|size|depth)\b/i,
-      /\badd\s+(?:\d+\s+)?(?:[\w\s]{1,20}\s+)?(?:mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?)\b/i,
-      /\b(?:fillet|chamfer|round|bevel)\s+(?:the\s+)?(?:[\w\s]{1,20}\s+)?(?:edges?|corners?)\b/i,
-      /\bchange\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|color|material|dimension)\b/i,
-      /\bset\s+(?:the\s+)?\w+\s+to\s+\d+\b/i,
+      /\b(?:modify|edit|update|adjust|alter|tweak|revise|re-?engineer)\b/i,
+      /\b(?:resize|scale|enlarge|shrink|stretch|compress|expand)\b/i,
+      /\b(?:make|render|turn)\s+(?:it|this|the\s+[\w\s]{1,30})\s+(?:wider|thicker|taller|bigger|smaller|longer|narrower|shorter|deeper|flatter|higher|lower|larger|slimmer|round(?:er)?|square|hollow|solid)\b/i,
+      /\b(?:increase|decrease|reduce|double|halve|cut|boost|raise|lower)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|size|depth|clearance|tolerance|spacing|count|number|angle|dimension|scale|elevation)\b/i,
+      /\badd\s+(?:\d+\s+)?(?:[\w\s]{1,25}\s+)?(?:mm|cm|holes?|screws?|fillets?|chamfers?|slots?|ribs?|cutouts?|pockets?|threads?|handles?|tabs?|flanges?|bevels?|trees?|lakes?|rivers?|mountains?|buildings?|rooms?|walls?|windows?|doors?)\b/i,
+      /\b(?:remove|delete|eliminate|take\s+away|cut\s+out)\s+(?:the\s+)?(?:[\w\s]{1,30})\b/i,
+      /\b(?:fillet|chamfer|round|bevel|hollow|pocket|extrude|revolve|cut|draft)\b/i,
+      /\b(?:change|set|switch|replace|swap)\s+(?:the\s+)?(?:[\w\s]{1,30}\s+)?(?:radius|diameter|height|width|length|thickness|color|material|finish|texture|appearance|dimension|shape|size)\b/i,
+      /\b(?:color|paint|make)\s+(?:it|the\s+[\w\s]{1,20})\s+(?:red|blue|green|yellow|black|white|grey|gray|orange|purple|gold|silver|bronze|copper|chrome|metallic|transparent|opaque|glass)\b/i,
+      /\b(?:material|make\s+it\s+out\s+of)\s+(?:metal|aluminum|steel|brass|wood|plastic|resin|glass|concrete|stone|pla|abs|petg|nylon)\b/i,
+      /\b(?:set|make)\s+(?:the\s+)?\w+\s+(?:to|=)\s+\d+/i,
+      /\b(?:more|fewer|less)\s+(?:trees?|hills?|valleys?|foliage|mountains?|detail|segments?|facets?)\b/i,
+      /\b(?:taller|shorter|wider|thicker|narrower|longer|bigger|smaller|flatter|higher|lower)\b/i,
     ];
 
-    return modifyDirectives.some((pat) => pat.test(text));
+    if (modifyDirectives.some((pat) => pat.test(text))) {
+      return true;
+    }
+
+    // 4. Pure informational questions without modification intent ("what is...", "why did...")
+    if (/^(?:what|which|who|where|when|why)\s+(?:is|are|was|were|do|does|did)\b/i.test(text)) {
+      return false;
+    }
+
+    // 5. In an active design session with prior CAD models, any prompt containing action verbs is a refinement
+    return /\b(?:add|remove|change|give|put|create|place|move|rotate|shift|extend|shorten|raise|lower|color|hollow|split|join)\b/i.test(
+      text
+    );
   }
+
+  const CAD_DESIGN_TARGETS_REGEX =
+    /\b(?:3d|2d|cad|solid|mesh|replicad|stl|step|stp|dxf|dwg|printable|model|assembly|blueprint|layout|schematic|floor\s*plans?|floorplans?|architectur(?:e|al)|houses?|homes?|buildings?|residen(?:ce|tial)|villas?|apartments?|rooms?|walls?|courtyards?|garages?|patios?|decks?|sheds?|cabins?|foundations?|footings?|staircases?|brackets?|gears?|nuts?|bolts?|screws?|washers?|enclosures?|boxes?|cases?|housings?|flanges?|nozzles?|holders?|mounts?|stands?|standoffs?|chassis|cylinders?|spheres?|cones?|clamps?|clips?|pipes?|ducts?|bushings?|propellers?|hooks?|hangers?|handles?|knobs?|adapters?|trays?|caps?|covers?|lids?|vases?|planters?|plates?|wheels?|pulleys?|funnels?|racks?|bearings?|spacers?|couplings?|fittings?|taps?|faucets?|valves?|fixtures?|motors?|spouts?|drones?|hardware|devices?|parts?|products?)\b/i;
 
   function isCadTaskIntent(prompt: string): boolean {
     const text = prompt.toLowerCase().trim();
@@ -188,19 +219,28 @@ export default function Home() {
     ];
     if (greetings.some((pat) => pat.test(text))) return false;
 
-    // 2. Informational questions, advice, troubleshooting, comparisons (strictly non-CAD unless explicit design directive)
-    const isInformational =
-      /^(?:what|which|who|where|when|why|how|can\s+you\s+explain|tell\s+me\s+about|explain|describe|give\s+me\s+advice|suggest|recommend|review|summarize)\b/i.test(text) ||
-      /\b(?:how\s+to\s+slice|slicing\s+settings|infill|print\s+settings|bed\s+temperature|nozzle\s+temp|warping|layer\s+height|stringing|difference\s+between|compare)\b/i.test(text);
-
+    // Check for direct modeling / design command (allows up to 6 intervening descriptive words/adjectives)
     const hasDirectModelingCommand =
-      /\b(?:design|create|build|generate|make|model)\s+(?:me\s+)?(?:a|an|the|\d+|new)?\s*(?:3d|cad|solid|mesh|stl|step|printable|bracket|gear|nut|bolt|screw|washer|enclosure|box|case|housing|flange|mount|stand|cylinder|sphere|cone|clamp|clip|pipe|vase|planter|plate|wheel|pulley|chassis|staircase|foundation)\b/i.test(text);
+      /\b(?:design|create|build|generate|make|draw|draft|construct|fabricate)\b(?:\s*[,;]?\s*[\w-]+){0,6}\s+(?:3d|2d|cad|solid|mesh|replicad|stl|step|stp|dxf|dwg|printable|model|assembly|blueprint|layout|schematic|floor\s*plans?|floorplans?|architectur(?:e|al)|houses?|homes?|buildings?|residen(?:ce|tial)|villas?|apartments?|rooms?|walls?|courtyards?|garages?|patios?|decks?|sheds?|cabins?|foundations?|footings?|staircases?|brackets?|gears?|nuts?|bolts?|screws?|washers?|enclosures?|boxes?|cases?|housings?|flanges?|nozzles?|holders?|mounts?|stands?|standoffs?|chassis|cylinders?|spheres?|cones?|clamps?|clips?|pipes?|ducts?|bushings?|propellers?|hooks?|hangers?|handles?|knobs?|adapters?|trays?|caps?|covers?|lids?|vases?|planters?|plates?|wheels?|pulleys?|funnels?|racks?|bearings?|spacers?|couplings?|fittings?|taps?|faucets?|valves?|fixtures?|motors?|spouts?|drones?|hardware|devices?|parts?|products?)\b/i.test(
+        text
+      );
+
+    // 2. Pure questions without design intent (what, which, who, where, when, why, how)
+    if (/^(?:what|which|who|where|when|why|how)\b/i.test(text)) return false;
+
+    const isInformational =
+      /^(?:can\s+you\s+explain|tell\s+me\s+about|explain|describe|give\s+me\s+advice|suggest|recommend|review|summarize)\b/i.test(text) ||
+      /\b(?:how\s+to\s+slice|slicing\s+settings|infill|print\s+settings|bed\s+temperature|nozzle\s+temp|warping|layer\s+height|stringing|difference\s+between|compare)\b/i.test(text);
 
     if (isInformational && !hasDirectModelingCommand) return false;
 
-    // 3. Documentation, spec sheets, code reviews
-    if (/\b(?:documentation|document|docs|writeup|manual|guide|spec\s*sheet|overview|readme|summary|review\s+code|code\s+review)\b/i.test(text) && !hasDirectModelingCommand) {
-      return false;
+    // 3. Pure documentation, manuals, spec sheets, code reviews
+    if (
+      /\b(?:write|provide|give|generate|create|make)\s+(?:me\s+)?(?:a\s+)?(?:documentation|docs|user\s+manual|manual|guide|spec\s*sheet|readme)\b/i.test(text) ||
+      /^(?:documentation|docs|manual|guide|spec\s*sheet|overview|readme|summary|review\s+code|code\s+review)\b/i.test(text) ||
+      /\b(?:code\s+review|review\s+code)\b/i.test(text)
+    ) {
+      if (!hasDirectModelingCommand) return false;
     }
 
     // 4. Direct 3D print command
@@ -211,19 +251,29 @@ export default function Home() {
       return true;
     }
 
-    // 5. Explicit CAD creation verbs coupled with 3D/mechanical geometry objects
-    const hasCreationVerb = /\b(?:design|create|build|generate|model|make|construct|extrude|revolve|fabricate)\b/i.test(text);
-    const has3dTarget = /\b(?:3d|cad|solid|mesh|replicad|stl|step|printable|bracket|gear|nut|bolt|screw|washer|enclosure|box|case|housing|flange|mount|stand|cylinder|sphere|cone|clamp|clip|pipe|duct|hinge|tray|cover|lid|vase|wheel|pulley|chassis|staircase|foundation)\b/i.test(text);
+    if (hasDirectModelingCommand) return true;
 
-    return hasCreationVerb && has3dTarget;
+    // 5. Explicit CAD creation verbs coupled with CAD/architectural/mechanical targets
+    const hasCreationVerb = /\b(?:design|create|build|generate|model|make|construct|extrude|revolve|fabricate|draw|draft)\b/i.test(text);
+    const hasCadTarget = CAD_DESIGN_TARGETS_REGEX.test(text);
+
+    // 6. Clarification option selection or auto-search directives
+    if (
+      /\b(?:proceed\s+with|select\s+option|option\s+[1-9]|none\s+of\s+the\s+above|auto-search|search\s+(?:google|web|specs?))\b/i.test(text)
+    ) {
+      return true;
+    }
+
+    return hasCreationVerb && hasCadTarget;
   }
 
-  function extractFileArtifacts(text: string, userPrompt?: string): { cleanText: string; artifacts: FileArtifact[] } {
+  function extractFileArtifacts(text: string): { cleanText: string; artifacts: FileArtifact[] } {
+    let cleanText = text;
+
     const artifacts: FileArtifact[] = [];
     const regex = /<file_artifact\s+filename="([^"]+)"(?:\s+type="([^"]+)")?(?:\s+title="([^"]+)")?>([\s\S]*?)<\/file_artifact>/gi;
 
     let match;
-    let cleanText = text;
 
     while ((match = regex.exec(text)) !== null) {
       const filename = match[1];
@@ -247,91 +297,67 @@ export default function Home() {
       });
     }
 
-    cleanText = cleanText.replace(/<file_artifact[\s\S]*?<\/file_artifact>/gi, "").trim();
-    cleanText = cleanText.replace(/<file_artifact[\s\S]*$/gi, "").trim();
+    // Support new specialized tool calling format: ```tool:<tool_name>\n{...}\n```
+    const toolRegex = /```tool:([a-z_]+)\s*\n([\s\S]*?)```/gi;
+    let toolMatch;
+    const toolExtMap: Record<string, string> = {
+      generate_word_document: "docx",
+      generate_excel_sheet: "xlsx",
+      generate_presentation: "pptx",
+      generate_pdf_report: "pdf",
+      generate_csv_export: "csv",
+    };
 
-    // Intelligent Fallback: If user explicitly requested a document format and model generated content without <file_artifact> tag
-    if (artifacts.length === 0 && userPrompt && cleanText) {
-      const p = userPrompt.toLowerCase();
-      if (/\b(?:excel|\.xlsx|spreadsheet)\b/i.test(p)) {
-        const table = parseMarkdownTable(cleanText);
-        if (table) {
+    while ((toolMatch = toolRegex.exec(text)) !== null) {
+      const toolName = toolMatch[1].trim();
+      const rawData = toolMatch[2].trim();
+      let data: any = rawData;
+      try {
+        data = JSON.parse(rawData);
+      } catch {
+        data = rawData;
+      }
+      const type = toolExtMap[toolName] || "txt";
+      const title = data?.title || toolName.replace("generate_", "").replace(/_/g, " ").toUpperCase();
+      const safeTitle = (title || "document").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_");
+      artifacts.push({
+        id: "tool-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+        filename: `${safeTitle}.${type}`,
+        type,
+        title,
+        data,
+      });
+    }
+
+    // Support unclosed tool block if generation ended before closing backticks
+    if (artifacts.length === 0) {
+      const unclosedToolRegex = /```tool:([a-z_]+)\s*\n([\s\S]*?)$/gi;
+      const unclosedMatch = unclosedToolRegex.exec(text);
+      if (unclosedMatch) {
+        const toolName = unclosedMatch[1].trim();
+        const rawData = unclosedMatch[2].trim();
+        try {
+          const data = JSON.parse(rawData);
+          const type = toolExtMap[toolName] || "txt";
+          const title = data?.title || toolName.replace("generate_", "").replace(/_/g, " ").toUpperCase();
+          const safeTitle = (title || "document").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_");
           artifacts.push({
-            id: "artifact-" + Date.now() + "-xlsx",
-            filename: "Document.xlsx",
-            type: "xlsx",
-            title: "Generated Spreadsheet",
-            data: {
-              sheets: [
-                {
-                  name: "Sheet1",
-                  columns: table.headers,
-                  rows: table.rows,
-                },
-              ],
-            },
+            id: "tool-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+            filename: `${safeTitle}.${type}`,
+            type,
+            title,
+            data,
           });
+        } catch {
+          // JSON incomplete or trailing
         }
-      } else if (/\b(?:word\s*(?:doc|document)?|\.docx)\b/i.test(p)) {
-        artifacts.push({
-          id: "artifact-" + Date.now() + "-docx",
-          filename: "Document.docx",
-          type: "docx",
-          title: "Generated Word Document",
-          data: cleanText,
-        });
-      } else if (/\b(?:powerpoint|ppt|\.pptx|slide\s*deck|slides?)\b/i.test(p)) {
-        const slides = parseMarkdownToSlides(cleanText);
-        if (slides.length > 0) {
-          artifacts.push({
-            id: "artifact-" + Date.now() + "-pptx",
-            filename: "Presentation.pptx",
-            type: "pptx",
-            title: "Generated Presentation",
-            data: {
-              title: "Presentation",
-              slides,
-            },
-          });
-        }
-      } else if (/\b(?:pdf|\.pdf)\b/i.test(p)) {
-        artifacts.push({
-          id: "artifact-" + Date.now() + "-pdf",
-          filename: "Document.pdf",
-          type: "pdf",
-          title: "Generated PDF Document",
-          data: cleanText,
-        });
-      } else if (/\b(?:csv|\.csv)\b/i.test(p)) {
-        const table = parseMarkdownTable(cleanText);
-        if (table) {
-          const csvContent = [table.headers.join(","), ...table.rows.map((r) => r.join(","))].join("\n");
-          artifacts.push({
-            id: "artifact-" + Date.now() + "-csv",
-            filename: "Data.csv",
-            type: "csv",
-            title: "CSV Export",
-            data: csvContent,
-          });
-        }
-      } else if (/\b(?:markdown|\.md)\b/i.test(p)) {
-        artifacts.push({
-          id: "artifact-" + Date.now() + "-md",
-          filename: "Document.md",
-          type: "md",
-          title: "Markdown Document",
-          data: cleanText,
-        });
-      } else if (/\b(?:json|\.json)\b/i.test(p)) {
-        artifacts.push({
-          id: "artifact-" + Date.now() + "-json",
-          filename: "Data.json",
-          type: "json",
-          title: "JSON Data",
-          data: cleanText,
-        });
       }
     }
+
+    cleanText = cleanText.replace(/<file_artifact[\s\S]*?<\/file_artifact>/gi, "").trim();
+    cleanText = cleanText.replace(/<file_artifact[\s\S]*$/gi, "").trim();
+    cleanText = cleanText.replace(/```tool:[a-z_]+\s*\n[\s\S]*?```/gi, "").trim();
+    cleanText = cleanText.replace(/```tool:[a-z_]+[\s\S]*$/gi, "").trim();
 
     return { cleanText, artifacts };
   }
@@ -342,6 +368,8 @@ export default function Home() {
     content = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "").replace(/<thought>[\s\S]*?(?:<\/thought>|$)/gi, "");
     // Strip any file_artifact blocks from live streaming display
     content = content.replace(/<file_artifact[\s\S]*?(?:<\/file_artifact>|$)/gi, "");
+    // Strip any tool call blocks from live streaming display
+    content = content.replace(/```tool:[a-z_]+[\s\S]*?(?:```|$)/gi, "");
     // Strip any Replicad 3D CAD scripts / code blocks from being shown in chat
     const replicadPattern = /```(?:typescript|ts|javascript|js|replicad)?[\s\S]*?(?:export\s+default\s+function|defaultParams|replicad)[\s\S]*?(?:```|$)/gi;
     return content.replace(replicadPattern, "").trim();
@@ -351,6 +379,7 @@ export default function Home() {
     let content = (explanation || streamedContent || "").trim();
     // Clean file_artifact blocks from final display (including unclosed tags)
     content = content.replace(/<file_artifact[\s\S]*?(?:<\/file_artifact>|$)/gi, "").trim();
+    content = content.replace(/```tool:[a-z_]+[\s\S]*?(?:```|$)/gi, "").trim();
     if (hasReplicadCode) {
       const stripped = cleanDisplayContent(content);
       return stripped || explanation || "Here is your 3D CAD model.";
@@ -370,16 +399,16 @@ export default function Home() {
       timestamp: Date.now(),
     };
 
-    // Only refine if a prior CAD model exists AND the user prompt is asking to modify it
+    // Only refine if a prior 3D model exists AND the user prompt is asking to modify it
     const previousAssistantMsg = [...activeSession.messages]
       .reverse()
-      .find((m) => m.role === "assistant" && m.cadResponse?.replicad_code);
+      .find((m) => m.role === "assistant" && (m.cadResponse?.replicad_code || m.cadResponse?.threejs_code));
 
     const isRefinement =
-      Boolean(previousAssistantMsg?.cadResponse?.replicad_code) &&
+      Boolean(previousAssistantMsg?.cadResponse?.replicad_code || previousAssistantMsg?.cadResponse?.threejs_code) &&
       isCadModificationIntent(promptText);
 
-    const isCadTask = isRefinement || isCadTaskIntent(promptText);
+    const isCadTask = isRefinement || isCadTaskIntent(promptText) || engineMode !== "auto";
 
     const assistantMsgId = "msg-" + (Date.now() + 1);
     const initialAssistantMessage: ChatMessage = {
@@ -417,7 +446,6 @@ export default function Home() {
     let accumulatedThoughts = "";
 
     const onThought = (chunk: string) => {
-      if (!isCadTask) return;
       accumulatedThoughts += chunk;
       setSessions((prev) =>
         prev.map((s) => {
@@ -488,15 +516,54 @@ export default function Home() {
     try {
       let cadResult: CadGenerationResponse;
 
+      // Commercial Multi-Turn Context: Window of recent dialogue turns (ensuring full chat & 3D context is preserved)
+      const conversationHistory: ChatHistoryMessage[] = activeSession.messages
+        .filter((m) => !m.error && (m.content || (m.artifacts && m.artifacts.length > 0) || m.cadResponse?.replicad_code || m.cadResponse?.threejs_code))
+        .slice(-10)
+        .map((m) => {
+          let text = m.content || "";
+          if (!text && m.role === "assistant") {
+            if (m.cadResponse?.raw_explanation) {
+              text = m.cadResponse.raw_explanation;
+            } else if (m.cadResponse?.threejs_code) {
+              text = "Generated procedural Three.js WebGL 3D scene.";
+            } else if (m.cadResponse?.replicad_code) {
+              const paramsSummary =
+                m.cadResponse.parameters && Object.keys(m.cadResponse.parameters).length > 0
+                  ? ` with parameters: ${JSON.stringify(m.cadResponse.parameters)}`
+                  : "";
+              const partsSummary =
+                m.cadResponse.parts && m.cadResponse.parts.length > 0
+                  ? ` containing parts: ${m.cadResponse.parts.map((p) => p.name).join(", ")}`
+                  : "";
+              text = `Generated 3D CAD model${paramsSummary}${partsSummary}.`;
+            } else if (m.artifacts && m.artifacts.length > 0) {
+              text = `Generated document artifact(s): ${m.artifacts.map((a) => a.title || a.filename).join(", ")}.`;
+            }
+          }
+          return {
+            role: m.role,
+            content: text,
+          };
+        })
+        .filter((m) => Boolean(m.content));
+
+      const shouldSearch =
+        /\b(?:search\s+google|search\s+web|auto-search|none\s+of\s+the\s+above|google\s+search)\b/i.test(promptText);
+
+      const previousCode = previousAssistantMsg?.cadResponse?.threejs_code || previousAssistantMsg?.cadResponse?.replicad_code || "";
       if (isRefinement && previousAssistantMsg?.cadResponse) {
         cadResult = await refineCadStream(
           promptText,
-          previousAssistantMsg.cadResponse.replicad_code,
+          previousCode,
           previousAssistantMsg.cadResponse.parameters || {},
           settings,
           onThought,
           onToken,
-          onReset
+          onReset,
+          conversationHistory,
+          shouldSearch,
+          engineMode
         );
       } else {
         cadResult = await generateCadStream(
@@ -504,19 +571,51 @@ export default function Home() {
           settings,
           onThought,
           onToken,
-          onReset
+          onReset,
+          undefined,
+          conversationHistory,
+          shouldSearch,
+          engineMode
         );
       }
 
       let cadGeometry = undefined;
-      if (isCadTask && cadResult?.replicad_code) {
+      let cadErrorMessage: string | undefined = undefined;
+      const hasThreejsCode = Boolean(cadResult?.threejs_code && cadResult.threejs_code.trim().length > 0);
+      const hasCadCode = Boolean(cadResult?.replicad_code && cadResult.replicad_code.trim().length > 0);
+
+      if (hasThreejsCode) {
+        const sceneId = "threejs-" + (cadResult.prompt_id?.slice(0, 10) || Date.now().toString(36));
+        cadGeometry = {
+          status: "success" as const,
+          modelId: sceneId,
+          engine_mode: "threejs",
+          threejs_code: cadResult.threejs_code,
+          metrics: {
+            boundingBox: {
+              min: [-50, 0, -50] as [number, number, number],
+              max: [50, 25, 50] as [number, number, number],
+              dimensions: { width: 100, depth: 100, height: 25 },
+            },
+            volume: 0,
+            vertexCount: 15000,
+            triangleCount: 30000,
+          },
+          cached: false,
+          executionTimeMs: cadResult.latency_ms || 100,
+          availableExports: ["stl"],
+        };
+      } else if (hasCadCode) {
         try {
           const geo = await generateModelGeometry(cadResult.replicad_code, cadResult.parameters || {});
           if (geo?.status === "success" && geo?.modelId) {
             cadGeometry = geo;
+          } else {
+            cadErrorMessage = "Kernel failed to compute solid geometry.";
           }
         } catch (cadErr: any) {
           const errMsg = cadErr?.message || String(cadErr);
+          cadErrorMessage = errMsg;
           console.warn("[CAD SERVICE] Initial script execution failed:", errMsg);
 
           // Commercial Production Self-Correction Loop:
@@ -534,36 +633,61 @@ export default function Home() {
               if (fixedGeo?.status === "success" && fixedGeo?.modelId) {
                 cadGeometry = fixedGeo;
                 cadResult = fixedResult;
+                cadErrorMessage = undefined;
                 console.log("[CAD AUTO-REPAIR] Successfully self-healed and generated 3D geometry!");
+              } else {
+                cadErrorMessage = `Auto-repair kernel notice: ${errMsg}`;
               }
             }
-          } catch (repairErr) {
+          } catch (repairErr: any) {
+            cadErrorMessage = repairErr?.message || errMsg;
             console.error("[CAD AUTO-REPAIR] Self-healing repair failed:", repairErr);
           }
         }
       }
 
       const rawExplanation = cadResult.raw_explanation || accumulatedContent;
-      const { cleanText, artifacts } = extractFileArtifacts(rawExplanation, promptText);
+      const { cleanText, artifacts } = extractFileArtifacts(rawExplanation);
+
+      // Merge structured tool_calls returned natively by the backend
+      if (cadResult?.tool_calls && cadResult.tool_calls.length > 0) {
+        for (const tc of cadResult.tool_calls) {
+          if (!artifacts.some((a) => a.filename === tc.filename)) {
+            artifacts.push({
+              id: "tool-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+              filename: tc.filename,
+              type: tc.artifact_type,
+              title: tc.title,
+              data: tc.data,
+            });
+          }
+        }
+      }
 
       if (cadResult?.parameters && artifacts.length > 0) {
         artifacts.forEach((art) => {
           if (typeof art.data === "object" && art.data !== null) {
-            art.data.parameters = { ...(art.data.parameters || {}), ...cadResult.parameters };
+            const d = art.data as Record<string, unknown>;
+            d.parameters = { ...((d.parameters as Record<string, unknown>) || {}), ...cadResult.parameters };
           }
         });
       }
 
+      const displayContent = cleanFinalContent(cleanText, accumulatedContent, Boolean(hasCadCode));
+      const finalContent = displayContent || (artifacts.length > 0 ? `Generated ${artifacts.map((a) => a.title || a.filename).join(", ")}.` : "");
+
       const finalAssistantMessage: ChatMessage = {
         id: assistantMsgId,
         role: "assistant",
-        content: cleanFinalContent(cleanText, accumulatedContent, Boolean(isCadTask && cadResult.replicad_code)),
+        content: finalContent,
         isStreaming: false,
         isThinking: false,
-        thoughts: isCadTask ? (accumulatedThoughts.trim() || cadResult.raw_thoughts || undefined) : undefined,
-        cadResponse: isCadTask && cadResult?.replicad_code ? cadResult : undefined,
-        geometry: isCadTask ? cadGeometry : undefined,
+        thoughts: accumulatedThoughts.trim() || cadResult.raw_thoughts || undefined,
+        cadResponse: hasCadCode ? cadResult : undefined,
+        geometry: cadGeometry || undefined,
+        cadError: hasCadCode && !cadGeometry ? cadErrorMessage : undefined,
         artifacts: artifacts.length > 0 ? artifacts : undefined,
+        toolCalls: cadResult?.tool_calls && cadResult.tool_calls.length > 0 ? cadResult.tool_calls : undefined,
         userPrompt: promptText,
         timestamp: Date.now(),
       };
@@ -630,16 +754,16 @@ export default function Home() {
       timestamp: Date.now(),
     };
 
-    // Check if there was any prior assistant message with CAD code before this prompt
+    // Check if there was any prior assistant message with 3D code before this prompt
     const previousAssistantMsg = [...messagesBefore]
       .reverse()
-      .find((m) => m.role === "assistant" && m.cadResponse?.replicad_code);
+      .find((m) => m.role === "assistant" && (m.cadResponse?.replicad_code || m.cadResponse?.threejs_code));
 
     const isRefinement =
-      Boolean(previousAssistantMsg?.cadResponse?.replicad_code) &&
+      Boolean(previousAssistantMsg?.cadResponse?.replicad_code || previousAssistantMsg?.cadResponse?.threejs_code) &&
       isCadModificationIntent(newPromptText);
 
-    const isCadTask = isRefinement || isCadTaskIntent(newPromptText);
+    const isCadTask = isRefinement || isCadTaskIntent(newPromptText) || engineMode !== "auto";
 
     const assistantMsgId = "msg-" + (Date.now() + 1);
     const initialAssistantMessage: ChatMessage = {
@@ -677,7 +801,6 @@ export default function Home() {
     let accumulatedThoughts = "";
 
     const onThought = (chunk: string) => {
-      if (!isCadTask) return;
       accumulatedThoughts += chunk;
       setSessions((prev) =>
         prev.map((s) => {
@@ -748,15 +871,54 @@ export default function Home() {
     try {
       let cadResult: CadGenerationResponse;
 
+      // Commercial Multi-Turn Context: Window of prior dialogue turns (ensuring full chat & 3D context is preserved)
+      const conversationHistory: ChatHistoryMessage[] = messagesBefore
+        .filter((m) => !m.error && (m.content || (m.artifacts && m.artifacts.length > 0) || m.cadResponse?.replicad_code || m.cadResponse?.threejs_code))
+        .slice(-10)
+        .map((m) => {
+          let text = m.content || "";
+          if (!text && m.role === "assistant") {
+            if (m.cadResponse?.raw_explanation) {
+              text = m.cadResponse.raw_explanation;
+            } else if (m.cadResponse?.threejs_code) {
+              text = "Generated procedural Three.js WebGL 3D scene.";
+            } else if (m.cadResponse?.replicad_code) {
+              const paramsSummary =
+                m.cadResponse.parameters && Object.keys(m.cadResponse.parameters).length > 0
+                  ? ` with parameters: ${JSON.stringify(m.cadResponse.parameters)}`
+                  : "";
+              const partsSummary =
+                m.cadResponse.parts && m.cadResponse.parts.length > 0
+                  ? ` containing parts: ${m.cadResponse.parts.map((p) => p.name).join(", ")}`
+                  : "";
+              text = `Generated 3D CAD model${paramsSummary}${partsSummary}.`;
+            } else if (m.artifacts && m.artifacts.length > 0) {
+              text = `Generated document artifact(s): ${m.artifacts.map((a) => a.title || a.filename).join(", ")}.`;
+            }
+          }
+          return {
+            role: m.role,
+            content: text,
+          };
+        })
+        .filter((m) => Boolean(m.content));
+
+      const shouldSearch =
+        /\b(?:search\s+google|search\s+web|auto-search|none\s+of\s+the\s+above|google\s+search)\b/i.test(newPromptText);
+
+      const previousCode = previousAssistantMsg?.cadResponse?.threejs_code || previousAssistantMsg?.cadResponse?.replicad_code || "";
       if (isRefinement && previousAssistantMsg?.cadResponse) {
         cadResult = await refineCadStream(
           newPromptText,
-          previousAssistantMsg.cadResponse.replicad_code,
+          previousCode,
           previousAssistantMsg.cadResponse.parameters || {},
           settings,
           onThought,
           onToken,
-          onReset
+          onReset,
+          conversationHistory,
+          shouldSearch,
+          engineMode
         );
       } else {
         cadResult = await generateCadStream(
@@ -764,19 +926,51 @@ export default function Home() {
           settings,
           onThought,
           onToken,
-          onReset
+          onReset,
+          undefined,
+          conversationHistory,
+          shouldSearch,
+          engineMode
         );
       }
 
       let cadGeometry = undefined;
-      if (isCadTask && cadResult?.replicad_code) {
+      let cadErrorMessage: string | undefined = undefined;
+      const hasThreejsCode = Boolean(cadResult?.threejs_code && cadResult.threejs_code.trim().length > 0);
+      const hasCadCode = Boolean(cadResult?.replicad_code && cadResult.replicad_code.trim().length > 0);
+
+      if (hasThreejsCode) {
+        const sceneId = "threejs-" + (cadResult.prompt_id?.slice(0, 10) || Date.now().toString(36));
+        cadGeometry = {
+          status: "success" as const,
+          modelId: sceneId,
+          engine_mode: "threejs",
+          threejs_code: cadResult.threejs_code,
+          metrics: {
+            boundingBox: {
+              min: [-50, 0, -50] as [number, number, number],
+              max: [50, 25, 50] as [number, number, number],
+              dimensions: { width: 100, depth: 100, height: 25 },
+            },
+            volume: 0,
+            vertexCount: 15000,
+            triangleCount: 30000,
+          },
+          cached: false,
+          executionTimeMs: cadResult.latency_ms || 100,
+          availableExports: ["stl"],
+        };
+      } else if (hasCadCode) {
         try {
           const geo = await generateModelGeometry(cadResult.replicad_code, cadResult.parameters || {});
           if (geo?.status === "success" && geo?.modelId) {
             cadGeometry = geo;
+          } else {
+            cadErrorMessage = "Kernel failed to compute solid geometry.";
           }
         } catch (cadErr: any) {
           const errMsg = cadErr?.message || String(cadErr);
+          cadErrorMessage = errMsg;
           console.warn("[CAD SERVICE] Initial script execution failed:", errMsg);
 
           // Commercial Production Self-Correction Loop
@@ -793,36 +987,61 @@ export default function Home() {
               if (fixedGeo?.status === "success" && fixedGeo?.modelId) {
                 cadGeometry = fixedGeo;
                 cadResult = fixedResult;
+                cadErrorMessage = undefined;
                 console.log("[CAD AUTO-REPAIR] Successfully self-healed and generated 3D geometry!");
+              } else {
+                cadErrorMessage = `Auto-repair kernel notice: ${errMsg}`;
               }
             }
-          } catch (repairErr) {
+          } catch (repairErr: any) {
+            cadErrorMessage = repairErr?.message || errMsg;
             console.error("[CAD AUTO-REPAIR] Self-healing repair failed:", repairErr);
           }
         }
       }
 
       const rawExplanation = cadResult.raw_explanation || accumulatedContent;
-      const { cleanText, artifacts } = extractFileArtifacts(rawExplanation, newPromptText);
+      const { cleanText, artifacts } = extractFileArtifacts(rawExplanation);
+
+      // Merge structured tool_calls returned natively by the backend
+      if (cadResult?.tool_calls && cadResult.tool_calls.length > 0) {
+        for (const tc of cadResult.tool_calls) {
+          if (!artifacts.some((a) => a.filename === tc.filename)) {
+            artifacts.push({
+              id: "tool-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+              filename: tc.filename,
+              type: tc.artifact_type,
+              title: tc.title,
+              data: tc.data,
+            });
+          }
+        }
+      }
 
       if (cadResult?.parameters && artifacts.length > 0) {
         artifacts.forEach((art) => {
           if (typeof art.data === "object" && art.data !== null) {
-            art.data.parameters = { ...(art.data.parameters || {}), ...cadResult.parameters };
+            const d = art.data as Record<string, unknown>;
+            d.parameters = { ...((d.parameters as Record<string, unknown>) || {}), ...cadResult.parameters };
           }
         });
       }
 
+      const displayContent = cleanFinalContent(cleanText, accumulatedContent, Boolean(hasCadCode));
+      const finalContent = displayContent || (artifacts.length > 0 ? `Generated ${artifacts.map((a) => a.title || a.filename).join(", ")}.` : "");
+
       const finalAssistantMessage: ChatMessage = {
         id: assistantMsgId,
         role: "assistant",
-        content: cleanFinalContent(cleanText, accumulatedContent, Boolean(isCadTask && cadResult.replicad_code)),
+        content: finalContent,
         isStreaming: false,
         isThinking: false,
-        thoughts: isCadTask ? (accumulatedThoughts.trim() || cadResult.raw_thoughts || undefined) : undefined,
-        cadResponse: isCadTask && cadResult?.replicad_code ? cadResult : undefined,
-        geometry: isCadTask ? cadGeometry : undefined,
+        thoughts: accumulatedThoughts.trim() || cadResult.raw_thoughts || undefined,
+        cadResponse: hasCadCode ? cadResult : undefined,
+        geometry: cadGeometry || undefined,
+        cadError: hasCadCode && !cadGeometry ? cadErrorMessage : undefined,
         artifacts: artifacts.length > 0 ? artifacts : undefined,
+        toolCalls: cadResult?.tool_calls && cadResult.tool_calls.length > 0 ? cadResult.tool_calls : undefined,
         userPrompt: newPromptText,
         timestamp: Date.now(),
       };
@@ -991,6 +1210,7 @@ export default function Home() {
                   onResubmitPrompt={handleResubmitPrompt}
                   onRefinePrompt={(suggestion) => handleSendMessage(suggestion)}
                   onOpenSettings={() => setIsSettingsOpen(true)}
+                  onNewChat={handleNewSession}
                   isLoading={isLoading}
                 />
               );
@@ -1020,6 +1240,8 @@ export default function Home() {
             isLoading={isLoading}
             selectedProvider={settings.selectedProvider}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            engineMode={engineMode}
+            onEngineModeChange={setEngineMode}
           />
         </footer>
       </div>

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Any
 
 from src.config import settings
-from src.domain.models import LlmGenerationResult
 from src.core.base import BaseLlmProvider
 from src.core.common import (
     StreamThoughtExtractor,
@@ -17,6 +17,7 @@ from src.core.common import (
     validate_api_key,
 )
 from src.core.models import get_models_to_try, is_retryable_model_error
+from src.domain.models import LlmGenerationResult
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -27,10 +28,10 @@ logger = logging.getLogger(__name__)
 class OpenAiProvider(BaseLlmProvider):
     """OpenAI API connector for GPT-4o and GPT-4 Turbo models."""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, base_url: str | None = None):
         self.api_key = api_key or settings.openai_api_key
         self.base_url = base_url or settings.openai_base_url
-        self._client: Optional[AsyncOpenAI] = None
+        self._client: AsyncOpenAI | None = None
         if self.api_key:
             from openai import AsyncOpenAI
             client_kwargs = {
@@ -43,8 +44,8 @@ class OpenAiProvider(BaseLlmProvider):
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
         **kwargs: Any,
@@ -55,7 +56,7 @@ class OpenAiProvider(BaseLlmProvider):
 
         async def _call(target_model: str):
             assert self._client is not None
-            create_kwargs: Dict[str, Any] = {
+            create_kwargs: dict[str, Any] = {
                 "model": target_model,
                 "messages": openai_messages,
             }
@@ -92,17 +93,17 @@ class OpenAiProvider(BaseLlmProvider):
 
     async def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         is_cad_task: bool = True,
         **kwargs: Any,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         validate_api_key("openai", self.api_key)
         start_time = time.perf_counter()
         openai_messages = format_chat_messages(messages)
         models_to_try = get_models_to_try("openai", requested_model=model, is_cad_task=is_cad_task)
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for current_model in models_to_try:
             yielded_any = False
@@ -111,7 +112,7 @@ class OpenAiProvider(BaseLlmProvider):
                     logger.info("OpenAI stream: falling back from '%s' to '%s'", models_to_try[0], current_model)
 
                 assert self._client is not None
-                create_kwargs: Dict[str, Any] = {
+                create_kwargs: dict[str, Any] = {
                     "model": current_model,
                     "messages": openai_messages,
                     "stream": True,
@@ -121,8 +122,8 @@ class OpenAiProvider(BaseLlmProvider):
 
                 stream = await self._client.chat.completions.create(**create_kwargs)
 
-                accumulated_tokens: List[str] = []
-                accumulated_thoughts: List[str] = []
+                accumulated_tokens: list[str] = []
+                accumulated_thoughts: list[str] = []
                 thought_extractor = StreamThoughtExtractor()
 
                 async for chunk in stream:
@@ -167,7 +168,7 @@ class OpenAiProvider(BaseLlmProvider):
     async def is_available(self) -> bool:
         return bool(self.api_key)
 
-    async def verify_credentials(self, model: Optional[str] = None) -> tuple[bool, str]:
+    async def verify_credentials(self, model: str | None = None) -> tuple[bool, str]:
         if not self.api_key or not self._client:
             return False, "OpenAI API key is missing. Please provide an API key in settings or set OPENAI_API_KEY."
         target_model = model or settings.openai_model
@@ -175,4 +176,4 @@ class OpenAiProvider(BaseLlmProvider):
             await self._client.models.list()
             return True, f"OpenAI credentials verified successfully (model target: {target_model})."
         except Exception as e:
-            return False, f"OpenAI authentication/connection failed: {str(e)}"
+            return False, f"OpenAI authentication/connection failed: {e!s}"

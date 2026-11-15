@@ -6,7 +6,7 @@ const ACTIVE_SESSION_STORAGE_KEY = "aicad_active_session_id_v1";
 
 export const DEFAULT_SETTINGS: AppSettings = {
   selectedProvider: "gemini",
-  backendUrl: "http://127.0.0.1:8000",
+  backendUrl: (typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL) || "http://127.0.0.1:8000",
   openaiApiKey: "",
   openaiChatModel: "gpt-4o-mini",
   openaiCadModel: "gpt-4o",
@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   geminiChatModel: "gemini-2.0-flash",
   geminiCadModel: "gemini-2.5-flash",
   groqApiKey: "",
-  groqChatModel: "openai/gpt-oss-20b",
+  groqChatModel: "llama-3.1-8b-instant",
   groqCadModel: "llama-3.3-70b-versatile",
   deepseekApiKey: "",
   deepseekChatModel: "deepseek-chat",
@@ -38,7 +38,13 @@ export function loadSettings(): AppSettings {
     if (parsed.selectedProvider === "mock" || parsed.selectedProvider === "ollama") {
       parsed.selectedProvider = "gemini";
     }
-    if (parsed.backendUrl === "http://localhost:8000") {
+    const envBackendUrl = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_BACKEND_URL : undefined;
+    if (
+      envBackendUrl &&
+      (!parsed.backendUrl || parsed.backendUrl.includes("127.0.0.1") || parsed.backendUrl.includes("localhost"))
+    ) {
+      parsed.backendUrl = envBackendUrl;
+    } else if (parsed.backendUrl === "http://localhost:8000") {
       parsed.backendUrl = "http://127.0.0.1:8000";
     }
     // Ensure separate chat and CAD models are explicitly initialized
@@ -60,8 +66,8 @@ export function loadSettings(): AppSettings {
     if (!parsed.anthropicCadModel) {
       parsed.anthropicCadModel = "claude-3-5-sonnet-20241022";
     }
-    if (!parsed.groqChatModel || parsed.groqChatModel === "llama-3.1-8b-instant") {
-      parsed.groqChatModel = "openai/gpt-oss-20b";
+    if (!parsed.groqChatModel || parsed.groqChatModel === "openai/gpt-oss-20b") {
+      parsed.groqChatModel = "llama-3.1-8b-instant";
     }
     if (!parsed.groqCadModel) {
       parsed.groqCadModel = "llama-3.3-70b-versatile";

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
 
 from src.config import settings
 
@@ -28,10 +27,10 @@ class ProviderModelConfig:
 
 
 # Banned models registry (kept empty so real models like gemini-2.0-flash / gemini-2.5-flash are not blocked)
-GEMINI_BANNED_MODELS = frozenset()
+GEMINI_BANNED_MODELS: frozenset[str] = frozenset()
 
 
-def _build_registry() -> Dict[str, ProviderModelConfig]:
+def _build_registry() -> dict[str, ProviderModelConfig]:
     """Dynamically builds the provider model registry pulling configured defaults from settings."""
     return {
         "gemini": ProviderModelConfig(
@@ -61,11 +60,11 @@ def _build_registry() -> Dict[str, ProviderModelConfig]:
                 "qwen-qwq-32b",
                 "llama-3.1-8b-instant",
             ),
-            chat_model=getattr(settings, "groq_fast_model", "openai/gpt-oss-20b"),
+            chat_model=getattr(settings, "groq_fast_model", "llama-3.1-8b-instant"),
             chat_fallbacks=(
                 "llama-3.1-8b-instant",
                 "deepseek-r1-distill-llama-70b",
-                "openai/gpt-oss-20b",
+                "llama-3.3-70b-versatile",
             ),
         ),
         "openai": ProviderModelConfig(
@@ -129,7 +128,7 @@ def _build_registry() -> Dict[str, ProviderModelConfig]:
     }
 
 
-def get_provider_config(provider: str) -> Optional[ProviderModelConfig]:
+def get_provider_config(provider: str) -> ProviderModelConfig | None:
     """Retrieves the model configuration for a provider."""
     registry = _build_registry()
     return registry.get((provider or "").lower().strip())
@@ -137,7 +136,7 @@ def get_provider_config(provider: str) -> Optional[ProviderModelConfig]:
 
 def sanitize_model(
     provider: str,
-    requested_model: Optional[str],
+    requested_model: str | None,
     is_cad_task: bool = False,
 ) -> str:
     """Sanitizes requested model, substituting defaults and explicitly banning deprecated targets.
@@ -168,9 +167,9 @@ def sanitize_model(
 
 def get_models_to_try(
     provider: str,
-    requested_model: Optional[str] = None,
+    requested_model: str | None = None,
     is_cad_task: bool = False,
-) -> List[str]:
+) -> list[str]:
     """Returns an ordered list of models: sanitized primary target first, followed by safe fallback candidates."""
     config = get_provider_config(provider)
     if not config:
@@ -178,7 +177,7 @@ def get_models_to_try(
         return [clean] if clean else ["default"]
 
     clean_model = sanitize_model(provider, requested_model, is_cad_task=is_cad_task)
-    models: List[str] = [clean_model]
+    models: list[str] = [clean_model]
 
     candidates = config.cad_fallbacks if is_cad_task else config.chat_fallbacks
     for candidate in candidates:
@@ -189,7 +188,7 @@ def get_models_to_try(
 
 
 def is_retryable_model_error(error: Exception) -> bool:
-    """Checks if an error indicates rate limit, quota exhaustion, or temporary capacity overload."""
+    """Checks if an error indicates rate limit, quota exhaustion, temporary capacity overload, or model unavailability."""
     err_str = str(error).lower()
     retryable_signatures = [
         "429",
@@ -208,7 +207,23 @@ def is_retryable_model_error(error: Exception) -> bool:
         "deadline",
         "timeout",
         "timed out",
+        "404",
+        "model_not_found",
         "model not found",
+        "does not exist",
+        "not exist",
+        "do not have access",
         "not available",
+        "not found",
+        "unknown model",
+        "decommissioned",
+        "deprecated",
+        "tool choice is none",
+        "model called a tool",
+        "model_terms_required",
+        "terms_required",
+        "terms acceptance",
+        "accept the terms",
+        "requires terms",
     ]
     return any(sig in err_str for sig in retryable_signatures)

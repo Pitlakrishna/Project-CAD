@@ -16,9 +16,13 @@ async function bootstrap() {
     },
   });
 
-  // Enable CORS
+  // Enable CORS (supports "*" or comma-separated origins via CORS_ORIGIN)
+  const corsOrigin =
+    config.corsOrigin === "*"
+      ? "*"
+      : config.corsOrigin.split(",").map((s) => s.trim()).filter(Boolean);
   await app.register(cors, {
-    origin: "*",
+    origin: corsOrigin,
     methods: ["GET", "POST", "OPTIONS"],
   });
 
@@ -42,11 +46,13 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  // Start gRPC Server
-  try {
-    startGrpcServer(config.grpcPort);
-  } catch (err) {
-    console.warn("[grpc] Warning: gRPC server failed to start:", err);
+  // Start gRPC Server (can be disabled via ENABLE_GRPC=false on HTTP-only PaaS hosts)
+  if (config.enableGrpc) {
+    try {
+      startGrpcServer(config.grpcPort);
+    } catch (err) {
+      console.warn("[grpc] Warning: gRPC server failed to start:", err);
+    }
   }
 
   // Graceful shutdown

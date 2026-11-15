@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { FileArtifact } from "../lib/types";
 import { downloadDynamicArtifact } from "../lib/universalDocumentGenerator";
 

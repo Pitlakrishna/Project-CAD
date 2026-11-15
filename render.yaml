@@ -1,0 +1,41 @@
+# Render Blueprint — deploys both active backend microservices together
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # 1. CAD Geometry Kernel Service (Node.js + OpenCASCADE / Replicad)
+  - type: web
+    name: aicad-cad-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./services/cad-service/Dockerfile
+    dockerContext: ./services/cad-service
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ENABLE_GRPC
+        value: "false"
+
+  # 2. LLM CAD Generation Service (Python FastAPI)
+  - type: web
+    name: aicad-llm-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./services/llm-service/Dockerfile
+    dockerContext: ./services/llm-service
+    healthCheckPath: /health
+    envVars:
+      - key: ENV
+        value: prod
+      - key: DEBUG
+        value: "false"
+      - key: CACHE_ENABLED
+        value: "false"
+      - key: RABBITMQ_ENABLED
+        value: "false"
+      - key: AUTO_REPAIR_CAD_ERRORS
+        value: "true"
+      # If Render appends a suffix to aicad-cad-service (e.g. -xyz.onrender.com), update this URL in Render Dashboard
+      - key: CAD_SERVICE_URL
+        value: https://aicad-cad-service.onrender.com
+

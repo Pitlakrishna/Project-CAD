@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 
 export function AdsPanel() {
   const [copied, setCopied] = useState(false);
-  const adEmail = "vanaram.industries@gmail.com"
+  const adEmail = process.env.NEXT_PUBLIC_CONTACT_EMAIL || "vanaram.industries@gmail.com";
 
   const handleCopyEmail = () => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {

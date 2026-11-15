@@ -1099,7 +1099,6 @@ export async function compilePowerPointPresentation(artifact: FileArtifact): Pro
 
 export async function compilePdfDocument(artifact: FileArtifact): Promise<Blob> {
   const docData = normalizeDocumentData(artifact);
-  const { theme } = docData;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
   let pageNumber = 1;
@@ -1293,9 +1292,10 @@ export function compileTextBlob(artifact: FileArtifact): Blob {
     mimeType = "text/csv;charset=utf-8;";
     if (typeof artifact.data === "string") {
       content = artifact.data;
-    } else if (artifact.data && Array.isArray(artifact.data.rows)) {
-      const headers = Array.isArray(artifact.data.headers) ? artifact.data.headers.join(",") : "";
-      const rows = artifact.data.rows.map((r: any[]) => r.join(",")).join("\n");
+    } else if (artifact.data && typeof artifact.data === "object" && "rows" in artifact.data) {
+      const csvData = artifact.data as { headers?: string[]; rows?: any[][] };
+      const headers = Array.isArray(csvData.headers) ? csvData.headers.join(",") : "";
+      const rows = Array.isArray(csvData.rows) ? csvData.rows.map((r: any[]) => r.join(",")).join("\n") : "";
       content = headers ? `${headers}\n${rows}` : rows;
     }
   } else if (artifact.type === "json") {

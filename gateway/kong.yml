@@ -1,22 +1,6 @@
 _format_version: "3.0"
 
 services:
-  - name: auth-service
-    url: http://auth-service:8081
-    routes:
-      - name: auth-routes
-        paths:
-          - /api/v1/auth
-        strip_path: false
-
-  - name: user-service
-    url: http://user-service:8082
-    routes:
-      - name: user-routes
-        paths:
-          - /api/v1/users
-        strip_path: false
-
   - name: llm-service
     url: http://llm-service:8000
     routes:
@@ -31,22 +15,6 @@ services:
       - name: cad-routes
         paths:
           - /api/v1/cad
-        strip_path: false
-
-  - name: payment-service
-    url: http://payment-service:8083
-    routes:
-      - name: payment-routes
-        paths:
-          - /api/v1/payments
-        strip_path: false
-
-  - name: file-service
-    url: http://file-service:8084
-    routes:
-      - name: file-routes
-        paths:
-          - /api/v1/files
         strip_path: false
 
 plugins:
@@ -71,7 +39,11 @@ plugins:
         - X-OpenAI-API-Key
         - X-Anthropic-API-Key
         - X-Gemini-API-Key
+        - X-Groq-API-Key
+        - X-DeepSeek-API-Key
+        - X-Chat-Model
+        - X-CAD-Model
       exposed_headers:
         - Authorization
-      credentials: true
+      credentials: false
       max_age: 3600

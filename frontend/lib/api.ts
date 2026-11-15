@@ -1,4 +1,4 @@
-import { AppSettings, CadGenerationResponse, CadGeometryResponse, ProviderType } from "./types";
+import { AppSettings, CadGenerationResponse, CadGeometryResponse, CadSceneResponse, ChatHistoryMessage, ProviderType } from "./types";
 
 export function getProviderParams(settings: AppSettings, providerOverride?: ProviderType) {
   const provider = providerOverride || settings.selectedProvider;
@@ -9,27 +9,27 @@ export function getProviderParams(settings: AppSettings, providerOverride?: Prov
 
   if (provider === "anthropic") {
     apiKey = settings.anthropicApiKey || undefined;
-    chatModel = settings.anthropicChatModel || "claude-3-5-haiku-20241022";
-    cadModel = settings.anthropicCadModel || "claude-3-5-sonnet-20241022";
+    chatModel = settings.anthropicChatModel || undefined;
+    cadModel = settings.anthropicCadModel || undefined;
   } else if (provider === "openai") {
     apiKey = settings.openaiApiKey || undefined;
-    chatModel = settings.openaiChatModel || "gpt-4o-mini";
-    cadModel = settings.openaiCadModel || "gpt-4o";
+    chatModel = settings.openaiChatModel || undefined;
+    cadModel = settings.openaiCadModel || undefined;
     baseUrl = settings.openaiBaseUrl || undefined;
   } else if (provider === "gemini") {
     apiKey = settings.geminiApiKey || undefined;
-    chatModel = settings.geminiChatModel || "gemini-3.5-flash-lite";
-    cadModel = settings.geminiCadModel || "gemini-3.8-flash";
+    chatModel = settings.geminiChatModel || undefined;
+    cadModel = settings.geminiCadModel || undefined;
   } else if (provider === "groq") {
     apiKey = settings.groqApiKey || undefined;
-    chatModel = settings.groqChatModel || "openai/gpt-oss-20b";
-    cadModel = settings.groqCadModel || "llama-3.3-70b-versatile";
-    baseUrl = "https://api.groq.com/openai/v1";
+    chatModel = settings.groqChatModel || undefined;
+    cadModel = settings.groqCadModel || undefined;
+    baseUrl = undefined; // Backend configures default Groq API endpoint
   } else if (provider === "deepseek") {
     apiKey = settings.deepseekApiKey || undefined;
-    chatModel = settings.deepseekChatModel || "deepseek-chat";
-    cadModel = settings.deepseekCadModel || "deepseek-chat";
-    baseUrl = settings.deepseekBaseUrl || "https://api.deepseek.com";
+    chatModel = settings.deepseekChatModel || undefined;
+    cadModel = settings.deepseekCadModel || undefined;
+    baseUrl = settings.deepseekBaseUrl || undefined;
   } else if (provider === "ollama") {
     chatModel = settings.ollamaModel || undefined;
     cadModel = settings.ollamaModel || undefined;
@@ -67,7 +67,10 @@ export function getProviderParams(settings: AppSettings, providerOverride?: Prov
 export async function generateCad(
   prompt: string,
   settings: AppSettings,
-  constraints?: Record<string, any>
+  constraints?: Record<string, any>,
+  history?: ChatHistoryMessage[],
+  enableSearch?: boolean,
+  engineMode?: "auto" | "cad" | "threejs"
 ): Promise<CadGenerationResponse> {
   const backendUrl = settings.backendUrl.replace(/\/+$/, "");
   const endpoint = `${backendUrl}/api/v1/llm/generate`;
@@ -76,6 +79,7 @@ export async function generateCad(
 
   const payload: Record<string, any> = {
     prompt,
+    history: history && history.length > 0 ? history : undefined,
     provider,
     chat_model: chatModel,
     cad_model: cadModel,
@@ -83,6 +87,8 @@ export async function generateCad(
     base_url: baseUrl,
     temperature: settings.temperature,
     constraints: constraints || {},
+    enable_search: enableSearch ?? undefined,
+    engine_mode: engineMode || "auto",
   };
 
   try {
@@ -113,7 +119,10 @@ export async function refineCad(
   prompt: string,
   previousCode: string,
   previousParameters: Record<string, any>,
-  settings: AppSettings
+  settings: AppSettings,
+  history?: ChatHistoryMessage[],
+  enableSearch?: boolean,
+  engineMode?: "auto" | "cad" | "threejs"
 ): Promise<CadGenerationResponse> {
   const backendUrl = settings.backendUrl.replace(/\/+$/, "");
   const endpoint = `${backendUrl}/api/v1/llm/refine`;
@@ -122,6 +131,7 @@ export async function refineCad(
 
   const payload: Record<string, any> = {
     prompt,
+    history: history && history.length > 0 ? history : undefined,
     previous_code: previousCode,
     previous_parameters: previousParameters,
     provider,
@@ -129,6 +139,8 @@ export async function refineCad(
     cad_model: cadModel,
     api_key: apiKey,
     base_url: baseUrl,
+    enable_search: enableSearch ?? undefined,
+    engine_mode: engineMode || "auto",
   };
 
   try {
@@ -236,7 +248,50 @@ export function formatErrorMessage(errText: string, provider?: string): string {
   const clean = (errText || "").trim();
   const lower = clean.toLowerCase();
 
-  // 1. Rate limit / Quota exceeded error detection across all providers
+  // 1. Context Window Limit Exceeded detection across all providers
+  if (
+    lower.includes("context window limit") ||
+    lower.includes("reduce the length") ||
+    lower.includes("context_length") ||
+    lower.includes("context length") ||
+    lower.includes("maximum context length") ||
+    lower.includes("prompt is too long") ||
+    lower.includes("prompt_too_long") ||
+    lower.includes("too many tokens") ||
+    lower.includes("input is too long") ||
+    lower.includes("string too long") ||
+    lower.includes("exceeds the context window") ||
+    lower.includes("context window") ||
+    lower.includes("payload size exceeds") ||
+    lower.includes("exceeds the maximum allowed tokens") ||
+    lower.includes("token count exceeds") ||
+    (lower.includes("param") && lower.includes("messages")) ||
+    lower.includes("messages or completion")
+  ) {
+    if (lower.includes("how to resolve")) {
+      return clean;
+    }
+    const provName = provider ? provider.toUpperCase() : "LLM";
+    return (
+      `Context Window Limit Exceeded (${provName}): The conversation history, 3D CAD model, or prompt exceeds the provider's token limit.\n\n` +
+      "How to resolve:\n" +
+      "1. Click New Chat (+) in the sidebar to start fresh and reset the context window.\n" +
+      "2. Switch to Google Gemini in Settings (⚙️) for a 1,000,000+ token free context window.\n" +
+      "3. If using Groq, upgrade to Pay-As-You-Go in the GroqCloud Console for 128k context, or shorten earlier turns."
+    );
+  }
+
+  // 2. Model terms acceptance required
+  if (
+    lower.includes("terms acceptance") ||
+    lower.includes("model_terms_required") ||
+    lower.includes("accept the terms") ||
+    lower.includes("requires terms")
+  ) {
+    return "Model terms required: The selected model requires terms acceptance in the provider's console. Please accept the terms or switch to another model in Settings (⚙️).";
+  }
+
+  // 3. Rate limit / Quota exceeded error detection across all providers
   if (
     lower.includes("429") ||
     lower.includes("resource_exhausted") ||
@@ -290,7 +345,7 @@ export function formatErrorMessage(errText: string, provider?: string): string {
 async function robustFetch(url: string, options: RequestInit): Promise<Response> {
   try {
     return await fetch(url, options);
-  } catch (err: any) {
+  } catch {
     // If localhost failed (common Windows IPv6 resolution issue where uvicorn binds to 127.0.0.1), fallback
     if (url.includes("localhost:8000")) {
       try {
@@ -429,7 +484,10 @@ export async function generateCadStream(
   onThought: (chunk: string) => void,
   onToken: (chunk: string) => void,
   onReset?: () => void,
-  constraints?: Record<string, any>
+  constraints?: Record<string, any>,
+  history?: ChatHistoryMessage[],
+  enableSearch?: boolean,
+  engineMode?: "auto" | "cad" | "threejs"
 ): Promise<CadGenerationResponse> {
   const backendUrl = settings.backendUrl.replace(/\/+$/, "");
   const endpoint = `${backendUrl}/api/v1/llm/generate/stream`;
@@ -437,6 +495,7 @@ export async function generateCadStream(
 
   const payload: Record<string, any> = {
     prompt,
+    history: history && history.length > 0 ? history : undefined,
     provider,
     chat_model: chatModel,
     cad_model: cadModel,
@@ -444,6 +503,8 @@ export async function generateCadStream(
     base_url: baseUrl,
     temperature: settings.temperature,
     constraints: constraints || {},
+    enable_search: enableSearch ?? undefined,
+    engine_mode: engineMode || "auto",
   };
 
   return streamSseHelper(endpoint, payload, headers, onThought, onToken, onReset);
@@ -456,7 +517,10 @@ export async function refineCadStream(
   settings: AppSettings,
   onThought: (chunk: string) => void,
   onToken: (chunk: string) => void,
-  onReset?: () => void
+  onReset?: () => void,
+  history?: ChatHistoryMessage[],
+  enableSearch?: boolean,
+  engineMode?: "auto" | "cad" | "threejs"
 ): Promise<CadGenerationResponse> {
   const backendUrl = settings.backendUrl.replace(/\/+$/, "");
   const endpoint = `${backendUrl}/api/v1/llm/refine/stream`;
@@ -464,6 +528,7 @@ export async function refineCadStream(
 
   const payload: Record<string, any> = {
     prompt,
+    history: history && history.length > 0 ? history : undefined,
     previous_code: previousCode,
     previous_parameters: previousParameters,
     provider,
@@ -471,15 +536,63 @@ export async function refineCadStream(
     cad_model: cadModel,
     api_key: apiKey,
     base_url: baseUrl,
+    enable_search: enableSearch ?? undefined,
+    engine_mode: engineMode || "auto",
   };
 
   return streamSseHelper(endpoint, payload, headers, onThought, onToken, onReset);
 }
 
+function getDefaultCadBaseUrl(): string {
+  return (typeof process !== "undefined" && process.env.NEXT_PUBLIC_CAD_SERVICE_URL) || "http://localhost:8002";
+}
+
+function isLocalBrowser(): boolean {
+  if (typeof window === "undefined") return false;
+  const host = window.location?.hostname || "";
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+}
+
+function buildCadCandidateUrls(
+  upstreamPath: string,
+  proxyPath: string,
+  explicitBaseUrl?: string
+): string[] {
+  const isBrowser = typeof window !== "undefined";
+  const envPublicCad = typeof process !== "undefined" ? process.env.NEXT_PUBLIC_CAD_SERVICE_URL : undefined;
+  const urls: string[] = [];
+
+  if (explicitBaseUrl) {
+    const clean = explicitBaseUrl.replace(/\/+$/, "");
+    urls.push(`${clean}${upstreamPath}`);
+    if (clean.includes("localhost:8002")) {
+      urls.push(clean.replace("localhost:8002", "127.0.0.1:8002") + upstreamPath);
+    }
+  } else if (envPublicCad) {
+    urls.push(`${envPublicCad.replace(/\/+$/, "")}${upstreamPath}`);
+  }
+
+  if (isBrowser) {
+    // Prefer direct public CAD URL if configured (avoids Vercel proxy timeout), with proxy fallback
+    if (envPublicCad && !explicitBaseUrl) {
+      urls.push(proxyPath);
+    } else {
+      urls.unshift(proxyPath);
+    }
+  }
+
+  if (!explicitBaseUrl && (!isBrowser || isLocalBrowser())) {
+    urls.push(`http://127.0.0.1:8002${upstreamPath}`);
+    urls.push(`http://localhost:8002${upstreamPath}`);
+  }
+
+  return Array.from(new Set(urls));
+}
+
 export function getCadDownloadUrl(
   modelId: string,
   format: "step" | "stl" | "dxf",
-  baseUrl: string = "http://localhost:8002"
+  baseUrl: string = getDefaultCadBaseUrl()
 ): string {
   const cleanUrl = baseUrl.replace(/\/+$/, "");
   return `${cleanUrl}/api/v1/cad/download/${modelId}/${format}`;
@@ -489,106 +602,89 @@ export async function downloadCadFileBlob(
   modelId: string,
   format: "step" | "stl" | "dxf",
   cadResponse?: CadGenerationResponse | null,
-  baseUrl: string = "http://localhost:8002"
+  baseUrl?: string
 ): Promise<Blob> {
-  const cleanUrl = baseUrl.replace(/\/+$/, "");
-  const downloadUrl = `${cleanUrl}/api/v1/cad/download/${modelId}/${format}`;
+  const urlsToTry = buildCadCandidateUrls(
+    `/api/v1/cad/download/${modelId}/${format}`,
+    `/api/cad/download/${modelId}/${format}`,
+    baseUrl
+  );
 
-  const tryFetch = async (targetUrl: string) => {
-    return await fetch(targetUrl, { signal: AbortSignal.timeout(10000) });
-  };
-
-  let res: Response | null = null;
-  try {
-    res = await tryFetch(downloadUrl);
-  } catch {
-    if (cleanUrl.includes("localhost:8002")) {
-      try {
-        res = await tryFetch(downloadUrl.replace("localhost:8002", "127.0.0.1:8002"));
-      } catch {
-        res = null;
+  for (const url of urlsToTry) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(45000) });
+      if (res && res.ok) {
+        return await res.blob();
       }
+    } catch {
+      // try next
     }
-  }
-
-  if (res && res.ok) {
-    return await res.blob();
   }
 
   // Fallback: If in-memory cache expired on cad-service, re-export on the fly
   if (cadResponse?.replicad_code) {
-    const tryExport = async (targetHost: string) => {
-      const exportRes = await fetch(`${targetHost}/api/v1/cad/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          script: cadResponse.replicad_code,
-          parameters: cadResponse.parameters || {},
-          format,
-        }),
-      });
-      if (!exportRes.ok) return null;
-      const data = await exportRes.json();
-      if (!data.downloadUrl) return null;
-      const retryRes = await fetch(`${targetHost}${data.downloadUrl}`);
-      if (retryRes.ok) {
-        return await retryRes.blob();
-      }
-      return null;
-    };
+    const isBrowser = typeof window !== "undefined";
+    const exportTargets = buildCadCandidateUrls("/api/v1/cad/export", "/api/cad/export", baseUrl);
 
-    let blob = await tryExport(cleanUrl).catch(() => null);
-    if (!blob && cleanUrl.includes("localhost:8002")) {
-      blob = await tryExport("http://127.0.0.1:8002").catch(() => null);
+    for (const exportEndpoint of exportTargets) {
+      try {
+        const exportRes = await fetch(exportEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script: cadResponse.replicad_code,
+            parameters: cadResponse.parameters || {},
+            format,
+          }),
+          signal: AbortSignal.timeout(45000),
+        });
+        if (!exportRes.ok) continue;
+        const data = await exportRes.json();
+        if (!data.downloadUrl) continue;
+
+        const downloadUrl = exportEndpoint === "/api/cad/export" && isBrowser
+          ? `/api/cad/download/${data.modelId || modelId}/${format}`
+          : `${exportEndpoint.replace(/\/api\/v1\/cad\/export$/, "")}${data.downloadUrl}`;
+
+        const retryRes = await fetch(downloadUrl, { signal: AbortSignal.timeout(45000) });
+        if (retryRes.ok) {
+          return await retryRes.blob();
+        }
+      } catch {
+        // try next export target
+      }
     }
-    if (blob) return blob;
   }
 
-  throw new Error(`Failed to download ${format.toUpperCase()} file (Server returned ${res?.status || "error"})`);
+  throw new Error(`Failed to download ${format.toUpperCase()} file`);
 }
 
 
 export async function generateModelGeometry(
   script: string,
-  parameters: Record<string, any> = {},
-  cadServiceUrl: string = "http://localhost:8002"
+  parameters: Record<string, unknown> = {},
+  cadServiceUrl?: string
 ): Promise<CadGeometryResponse | null> {
-  const cleanUrl = cadServiceUrl.replace(/\/+$/, "");
-
-  const tryFetch = async (targetUrl: string) => {
-    return await fetch(`${targetUrl}/api/v1/cad/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ script, parameters }),
-      signal: AbortSignal.timeout(15000),
-    });
-  };
+  const urlsToTry = buildCadCandidateUrls("/api/v1/cad/generate", "/api/cad/generate", cadServiceUrl);
 
   let lastError: Error | null = null;
-  try {
-    const res = await tryFetch(cleanUrl);
-    if (res.ok) {
-      return (await res.json()) as CadGeometryResponse;
-    } else {
-      const errData = await res.json().catch(() => ({}));
-      lastError = new Error(errData.error || `CAD service error (${res.status})`);
-    }
-  } catch (err: any) {
-    lastError = err;
-    // If localhost failed (Windows IPv6 fallback)
-    if (cleanUrl.includes("localhost:8002")) {
-      try {
-        const fallbackUrl = cleanUrl.replace("localhost:8002", "127.0.0.1:8002");
-        const res = await tryFetch(fallbackUrl);
-        if (res.ok) {
-          return (await res.json()) as CadGeometryResponse;
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          lastError = new Error(errData.error || `CAD service error (${res.status})`);
-        }
-      } catch (fallbackErr: any) {
-        lastError = fallbackErr;
+  for (const url of urlsToTry) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ script, parameters }),
+        signal: AbortSignal.timeout(45000),
+      });
+
+      if (res.ok) {
+        return (await res.json()) as CadGeometryResponse;
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        lastError = new Error(errData.error || `CAD service error (${res.status})`);
       }
+    } catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error(String(err));
     }
   }
 
@@ -597,4 +693,42 @@ export async function generateModelGeometry(
   }
   return null;
 }
+
+export async function fetchCadScene(
+  modelId: string,
+  cadServiceUrl?: string
+): Promise<CadSceneResponse | null> {
+  const urlsToTry = buildCadCandidateUrls(
+    `/api/v1/cad/scene/${modelId}`,
+    `/api/cad/scene/${modelId}`,
+    cadServiceUrl
+  );
+
+  let lastError: Error | null = null;
+  for (const url of urlsToTry) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(45000),
+      });
+
+      if (res.ok) {
+        return (await res.json()) as CadSceneResponse;
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        lastError = new Error(errData.error || `CAD service error (${res.status})`);
+      }
+    } catch (err: unknown) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+  return null;
+}
+
+
 

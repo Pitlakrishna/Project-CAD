@@ -2,8 +2,10 @@
 
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from src.api.routes import router
 from src.config import settings
 
@@ -35,10 +37,13 @@ app = FastAPI(
 )
 
 # CORS configuration
+origins = settings.cors_origins
+use_wildcard = "*" in origins or not origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"] if use_wildcard else origins,
+    allow_credentials=False if use_wildcard else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

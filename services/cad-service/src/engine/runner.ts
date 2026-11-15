@@ -5,6 +5,7 @@ import { config } from "../config.js";
 import { initKernel } from "./kernel.js";
 import { extractGeometryMetrics, GeometryMetrics } from "./metrics.js";
 import { makeBox, makeCone, makeTorus, sketchOnPlane } from "./primitives.js";
+import { exportToSTL } from "../exporters/stl.js";
 
 // Enhanced replicad namespace with industrial-grade CAD primitives
 const enhancedReplicad: Record<string, any> = {
@@ -22,10 +23,25 @@ const enhancedReplicad: Record<string, any> = {
   drawRoundedRectangle: (replicad as any).drawRoundedRectangle,
 };
 
+export interface PartVisualItem {
+  name: string;
+  shape: any;
+  color?: string;
+  material?: string;
+  opacity?: number;
+  roughness?: number;
+  metalness?: number;
+  transmission?: number;
+  ior?: number;
+  transparent?: boolean;
+  stlBuffer?: Buffer;
+}
+
 export interface ExecutionResult {
   shape: any;
   metrics: GeometryMetrics;
   executionTimeMs: number;
+  parts?: PartVisualItem[];
 }
 
 /**
@@ -171,11 +187,45 @@ export async function executeReplicadScript(
     throw new Error(`Shape evaluation error: ${msg}`);
   }
 
+  let partItems: PartVisualItem[] = [];
+  let primaryMaterial: string | undefined = parameters?.__material;
+
   // Handle assemblies or arrays of shapes (e.g. [{ name, shape, color, material }])
   if (Array.isArray(finalShape)) {
     if (finalShape.length === 0) {
       throw new Error("Script returned an empty array of shapes");
     }
+
+    // Collect part metadata for physical mass calculation and 3D WebGL scene rendering
+    for (let i = 0; i < finalShape.length; i++) {
+      const item = finalShape[i];
+      if (item && typeof item === "object" && item.shape) {
+        let stlBuffer: Buffer | undefined;
+        try {
+          stlBuffer = await exportToSTL(item.shape);
+        } catch (stlErr) {
+          console.warn(`[cad-runner] Pre-export STL failed for part ${item.name}:`, stlErr);
+        }
+
+        partItems.push({
+          name: item.name || `Part_${i + 1}`,
+          shape: typeof item.shape.clone === "function" ? item.shape.clone() : item.shape,
+          color: item.color,
+          material: item.material,
+          opacity: item.opacity,
+          roughness: item.roughness,
+          metalness: item.metalness,
+          transmission: item.transmission,
+          ior: item.ior,
+          transparent: item.transparent,
+          stlBuffer,
+        });
+        if (!primaryMaterial && item.material) {
+          primaryMaterial = item.material;
+        }
+      }
+    }
+
     // Extract actual solids if array contains part objects ({ shape, name, ... })
     const shapes = finalShape
       .map((item) => (item && typeof item === "object" && item.shape ? item.shape : item))
@@ -185,23 +235,65 @@ export async function executeReplicadScript(
       throw new Error("No valid 3D solids found in returned assembly array");
     }
 
-    if (shapes.length > 1 && typeof shapes[0]?.fuse === "function") {
-      let combined = shapes[0];
-      for (let i = 1; i < shapes.length; i++) {
-        if (shapes[i]) {
-          try {
-            const shapeToFuse = typeof shapes[i].clone === "function" ? shapes[i].clone() : shapes[i];
-            combined = combined.fuse(shapeToFuse);
-          } catch {
-            // If fuse fails, fallback to keeping current combined shape
-          }
+    if (shapes.length > 1) {
+      // In professional CAD (STEP / STL), an assembly of multiple components is represented as a Compound shape,
+      // which guarantees that non-intersecting, clearance-spaced, or touching parts are NEVER discarded or dropped.
+      let assemblyCreated = false;
+      const makeCompoundFn = (replicad as any).makeCompound || (replicad as any).compoundShapes;
+      if (typeof makeCompoundFn === "function") {
+        try {
+          finalShape = makeCompoundFn(shapes);
+          assemblyCreated = true;
+        } catch (compoundErr) {
+          console.warn("[cad-runner] makeCompound failed, attempting Boolean fusion fallback:", compoundErr);
         }
       }
-      finalShape = combined;
+
+      if (!assemblyCreated) {
+        if (typeof shapes[0]?.fuse === "function") {
+          let combined = shapes[0];
+          for (let i = 1; i < shapes.length; i++) {
+            if (shapes[i]) {
+              try {
+                const shapeToFuse = typeof shapes[i].clone === "function" ? shapes[i].clone() : shapes[i];
+                combined = combined.fuse(shapeToFuse);
+              } catch {
+                // If fuse fails, fallback to keeping current combined shape
+              }
+            }
+          }
+          finalShape = combined;
+        } else {
+          finalShape = shapes[0];
+        }
+      }
     } else {
       finalShape = shapes[0];
     }
   } else if (finalShape && typeof finalShape === "object" && finalShape.shape) {
+    if (!primaryMaterial && finalShape.material) {
+      primaryMaterial = finalShape.material;
+    }
+    let stlBuffer: Buffer | undefined;
+    try {
+      stlBuffer = await exportToSTL(finalShape.shape);
+    } catch (stlErr) {
+      console.warn("[cad-runner] Pre-export STL failed for single part:", stlErr);
+    }
+
+    partItems.push({
+      name: finalShape.name || "Part",
+      shape: typeof finalShape.shape.clone === "function" ? finalShape.shape.clone() : finalShape.shape,
+      color: finalShape.color,
+      material: finalShape.material,
+      opacity: finalShape.opacity,
+      roughness: finalShape.roughness,
+      metalness: finalShape.metalness,
+      transmission: finalShape.transmission,
+      ior: finalShape.ior,
+      transparent: finalShape.transparent,
+      stlBuffer,
+    });
     // Single part object { name, shape, ... }
     finalShape = finalShape.shape;
   }
@@ -214,12 +306,22 @@ export async function executeReplicadScript(
 
   let metrics: GeometryMetrics;
   try {
-    metrics = extractGeometryMetrics(finalShape);
+    metrics = extractGeometryMetrics(
+      finalShape,
+      primaryMaterial,
+      partItems.length > 0 ? partItems : undefined
+    );
   } catch (metricsErr: any) {
     console.warn("[cad-runner] Warning: Metrics extraction failed, using fallback defaults:", metricsErr);
     metrics = {
       boundingBox: { min: [0, 0, 0], max: [0, 0, 0], dimensions: { width: 0, depth: 0, height: 0 } },
       volume: 0,
+      surfaceAreaMm2: 0,
+      massKg: 0,
+      centerOfMass: [0, 0, 0],
+      material: "aluminum-6061",
+      materialName: "Aluminum 6061-T6",
+      estimatedCostUsd: 0,
       vertexCount: 0,
       triangleCount: 0,
     };
@@ -229,5 +331,6 @@ export async function executeReplicadScript(
     shape: finalShape,
     metrics,
     executionTimeMs,
+    parts: partItems.length > 0 ? partItems : undefined,
   };
 }

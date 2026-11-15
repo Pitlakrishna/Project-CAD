@@ -1,41 +1,28 @@
-version: '3.8'
-
 # Production Docker Compose overrides (for single-node host or staging)
 services:
-  postgres:
-    restart: always
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4096M
-
   redis:
     restart: always
     deploy:
       resources:
         limits:
           cpus: '1.0'
-          memory: 2048M
+          memory: 1024M
 
-  rabbitmq:
+  cad-service:
     restart: always
     deploy:
       resources:
         limits:
           cpus: '2.0'
-          memory: 4096M
+          memory: 2048M
 
-  # minio:
-  #   restart: always
-
-  # clickhouse:
-  #   restart: always
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         cpus: '4.0'
-  #         memory: 8192M
+  llm-service:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
 
   kong:
     restart: always

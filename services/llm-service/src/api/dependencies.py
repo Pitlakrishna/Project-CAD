@@ -1,19 +1,20 @@
 """FastAPI dependency injection providers."""
 
 from functools import lru_cache
-from typing import Optional
+
 from fastapi import Request
+
 from src.domain.services import CadGenerationService
 from src.infrastructure.cache import PromptCache
 from src.infrastructure.messaging import EventPublisher
 
 
-@lru_cache()
+@lru_cache
 def get_prompt_cache() -> PromptCache:
     return PromptCache()
 
 
-@lru_cache()
+@lru_cache
 def get_event_publisher() -> EventPublisher:
     return EventPublisher()
 
@@ -30,12 +31,12 @@ class RequestCredentials:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
-        chat_model: Optional[str] = None,
-        cad_model: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        chat_model: str | None = None,
+        cad_model: str | None = None,
+        base_url: str | None = None,
     ):
         self.api_key = api_key
         self.provider = provider

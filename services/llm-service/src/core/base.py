@@ -1,7 +1,9 @@
 """Abstract base interface for LLM providers."""
 
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
+
 from src.domain.models import LlmGenerationResult
 
 
@@ -11,21 +13,20 @@ class BaseLlmProvider(ABC):
     @abstractmethod
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         **kwargs: Any,
     ) -> LlmGenerationResult:
         """Sends chat messages to LLM and returns raw response string with metadata."""
-        pass
 
     async def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        model: Optional[str] = None,
+        messages: list[dict[str, str]],
+        model: str | None = None,
         temperature: float = 0.2,
         **kwargs: Any,
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Default stream implementation using standard generate call."""
         res = await self.generate(messages, model=model, temperature=temperature, **kwargs)
         yield {"type": "token", "content": res.raw_response}
@@ -41,9 +42,7 @@ class BaseLlmProvider(ABC):
     @abstractmethod
     async def is_available(self) -> bool:
         """Returns True if the provider is configured and reachable."""
-        pass
 
     @abstractmethod
-    async def verify_credentials(self, model: Optional[str] = None) -> tuple[bool, str]:
+    async def verify_credentials(self, model: str | None = None) -> tuple[bool, str]:
         """Validates the configured API credentials and connectivity, returning (success, message)."""
-        pass

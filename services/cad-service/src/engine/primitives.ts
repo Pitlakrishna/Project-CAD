@@ -56,19 +56,22 @@ export function makeBox(
 
   let solid: any;
   try {
+    // drawRectangle is always cleanly centered at (0, 0) in XY with extrusion along Z from 0 to dz
+    solid = (replicad as any).drawRectangle(dx, dy).sketchOnPlane("XY").extrude(dz);
+  } catch (_err) {
     if (typeof (replicad as any).makeBaseBox === "function") {
       solid = (replicad as any).makeBaseBox(dx, dy, dz);
+      // Center in XY to match standard replicad 2D sketch conventions
+      solid = solid.translate([-dx / 2, -dy / 2, 0]);
     } else {
-      solid = (replicad as any).drawRectangle(dx, dy).sketchOnPlane("XY").extrude(dz);
+      throw _err;
     }
-  } catch (_err) {
-    solid = (replicad as any).drawRectangle(dx, dy).sketchOnPlane("XY").extrude(dz);
   }
 
   if (Array.isArray(origin) && origin.length === 3) {
     solid = solid.translate(origin);
   } else if (!isCentered) {
-    // If not centered, offset from center so corner is at (0, 0, 0)
+    // If explicitly marked as not centered, offset so corner is at (0, 0, 0)
     solid = solid.translate([dx / 2, dy / 2, 0]);
   }
 
